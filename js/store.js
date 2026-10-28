@@ -181,7 +181,11 @@ export function shortName(s) {
 export const activeSubjects = () => state.subjects.filter((s) => !s.final);
 
 /** ¿La asignatura tiene clase este cuatrimestre? */
-export const inCurrentTerm = (s) => !s.final && (s.term === 'A' || s.term === currentTerm());
+/** ¿Es del curso académico actual? */
+export const isThisYear = (s) => (s.academicYear || '').replace(/\s/g, '') === academicYear();
+
+/** ¿Tiene clase ahora? Solo las de este curso y este cuatrimestre */
+export const inCurrentTerm = (s) => !s.final && isThisYear(s) && (s.term === 'A' || s.term === currentTerm());
 
 export function deleteSubject(id) {
   state.subjects = state.subjects.filter((s) => s.id !== id);

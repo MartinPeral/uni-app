@@ -4,7 +4,7 @@
 
 import * as S from './store.js';
 
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.1';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -448,7 +448,7 @@ function viewHome() {
 //  ASIGNATURAS
 // =============================================================
 
-let subjFilter = 'active';
+let subjFilter = 'year';
 
 function subjectCard(s) {
   const c = S.calc(s);
@@ -460,33 +460,63 @@ function subjectCard(s) {
       <div class="subj-top">
         <div class="subj-name">
           <strong>${esc(s.name)}</strong>
-          <small>${fmt(s.credits, 1)} ECTS · ${s.year}.º · ${S.TERMS[s.term] || ''}</small>
+          <small>${fmt(s.credits, 1)} ECTS · ${s.year}.º curso${subjFilter === 'past' ? ' · ' + S.TERMS[s.term] : ''}</small>
         </div>
         ${gradeBadge(g, { honors: s.final?.honors, size: 'lg' })}
       </div>
       ${s.final ? '' : compBar(c, s)}
       <div class="subj-foot">
         <span class="tone-${info.tone}">${esc(info.title)}</span>
-        ${next ? `<span class="muted">${S.KINDS[next.kind].label} · ${rel(next.date).toLowerCase()}</span>` : s.final ? `<span class="muted">${esc(s.academicYear || '')}</span>` : ''}
+        ${next ? `<span class="muted">${S.KINDS[next.kind].label} · ${rel(next.date).toLowerCase()}</span>` : ''}
       </div>
     </a>`;
 }
 
+const byName = (a, b) => a.year - b.year || a.name.localeCompare(b.name);
+
+/** Cabecera de un grupo con número de asignaturas y créditos */
+function groupHead(title, arr, badge = '') {
+  const credits = arr.reduce((a, s) => a + (+s.credits || 0), 0);
+  return `
+    <h2 class="section-title grp">${title}${badge}
+      ${arr.length ? `<span class="count">${arr.length} · ${fmt(credits, 1)} ECTS</span>` : ''}
+    </h2>`;
+}
+
 function viewSubjects() {
   const all = S.state.subjects;
-  const list = subjFilter === 'active' ? all.filter((s) => !s.final)
-    : subjFilter === 'done' ? all.filter((s) => s.final)
-      : all;
+  const year = S.academicYear();
+  const thisYear = all.filter(S.isThisYear);
+  const past = all.filter((s) => !S.isThisYear(s));
+  const now = S.currentTerm();
 
-  // Agrupar por curso y cuatrimestre
-  const groups = new Map();
-  for (const s of [...list].sort((a, b) => a.year - b.year || a.term.localeCompare(b.term) || a.name.localeCompare(b.name))) {
-    const k = `${s.year}.º curso · ${S.TERMS[s.term]}`;
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k).push(s);
+  let body = '';
+  if (subjFilter === 'year') {
+    const terms = ['C1', 'C2', 'A']
+      .map((t) => [t, thisYear.filter((s) => s.term === t).sort(byName)])
+      .filter(([t, arr]) => arr.length || t !== 'A');
+    body = thisYear.length
+      ? terms.map(([t, arr]) => `
+          ${groupHead(S.TERMS[t], arr, t === now || (t === 'A' && arr.length) ? '<span class="now-tag">Ahora</span>' : '')}
+          ${arr.length
+            ? `<div class="stack">${arr.map(subjectCard).join('')}</div>`
+            : `<button class="add-term" data-action="new-subject" data-term="${t}">${I.plusSm} Añadir asignatura del ${t === 'C1' ? 'primer' : 'segundo'} cuatrimestre</button>`}`).join('')
+      : empty(I.book, 'Sin asignaturas este curso', `Añade las asignaturas que cursas en ${year}, separadas por cuatrimestre.`,
+        '<button class="btn primary" data-action="new-subject">Añadir asignatura</button>');
+  } else {
+    // Cursos anteriores, del más reciente al más antiguo
+    const groups = new Map();
+    for (const s of [...past].sort((a, b) => (b.academicYear || '').localeCompare(a.academicYear || '') || byName(a, b))) {
+      const k = s.academicYear ? `Curso ${s.academicYear}` : 'Sin curso académico';
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(s);
+    }
+    body = past.length
+      ? [...groups].map(([k, arr]) => `${groupHead(k, arr)}<div class="stack">${arr.map(subjectCard).join('')}</div>`).join('')
+        + '<button class="btn ghost block mt" data-action="add-past">Añadir asignatura ya aprobada</button>'
+      : empty(I.cap, 'Nada de otros cursos', 'Añade las asignaturas que ya aprobaste para tener tu expediente y tu media completos.',
+        '<button class="btn primary" data-action="add-past">Añadir asignatura aprobada</button>');
   }
-
-  const counts = { active: all.filter((s) => !s.final).length, done: all.filter((s) => s.final).length, all: all.length };
 
   return `
     <header class="top">
@@ -494,19 +524,10 @@ function viewSubjects() {
       <button class="icon-btn accent" data-action="new-subject" aria-label="Nueva asignatura">${I.plus}</button>
     </header>
     <div class="seg">
-      ${[['active', 'En curso'], ['done', 'Cerradas'], ['all', 'Todas']].map(([k, l]) =>
-        `<button class="${subjFilter === k ? 'on' : ''}" data-action="subj-filter" data-v="${k}">${l} <em>${counts[k]}</em></button>`).join('')}
+      <button class="${subjFilter === 'year' ? 'on' : ''}" data-action="subj-filter" data-v="year">Curso ${year} <em>${thisYear.length}</em></button>
+      <button class="${subjFilter === 'past' ? 'on' : ''}" data-action="subj-filter" data-v="past">Anteriores <em>${past.length}</em></button>
     </div>
-    ${list.length
-      ? [...groups].map(([k, arr]) => `
-          <h2 class="section-title">${k}</h2>
-          <div class="stack">${arr.map(subjectCard).join('')}</div>`).join('')
-      : empty(I.book,
-        subjFilter === 'done' ? 'Nada cerrado todavía' : 'Sin asignaturas',
-        subjFilter === 'done' ? 'Aquí aparecerán las asignaturas con nota final. Puedes añadir las que ya aprobaste para calcular tu media.' : 'Añade las asignaturas que estás cursando.',
-        subjFilter === 'done'
-          ? '<button class="btn primary" data-action="add-past">Añadir asignatura aprobada</button>'
-          : '<button class="btn primary" data-action="new-subject">Añadir asignatura</button>')}
+    ${body}
     ${fab()}`;
 }
 
@@ -1213,8 +1234,8 @@ function openQuickAdd() {
 
 // --- Asignatura ---
 
-function openSubjectSheet(id) {
-  const s = id ? S.subject(id) : S.newSubject();
+function openSubjectSheet(id, term) {
+  const s = id ? S.subject(id) : S.newSubject(term ? { term } : {});
   sheetCtx = { id };
   const years = [1, 2, 3, 4, 5, 6].map((y) => [y, `${y}.º`]);
   openSheet(id ? 'Editar asignatura' : 'Nueva asignatura', `
@@ -1462,7 +1483,7 @@ const actions = {
   // --- Asignaturas ---
   'subj-filter': (el) => { subjFilter = el.dataset.v; render(); },
   'subj-tab': (el) => { subjTab[el.dataset.id] = el.dataset.v; simOn = false; render(); },
-  'new-subject': () => openSubjectSheet(),
+  'new-subject': (el) => openSubjectSheet(null, el?.dataset?.term),
   'edit-subject': (el) => openSubjectSheet(el.dataset.id),
   'save-subject': () => {
     const d = formData();
