@@ -4,7 +4,7 @@
 
 import * as S from './store.js';
 
-const APP_VERSION = '1.2';
+const APP_VERSION = '1.3';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -236,9 +236,20 @@ function statusInfo(s, c) {
     case 'secured': return { tone: 'good', title: 'Aprobado asegurado', text: c.minsPending.length ? 'Te falta llegar a las notas mínimas que quedan.' : 'Aunque saques un 0 en lo que queda.' };
     case 'impossible': return { tone: 'bad', title: 'No llegas por continua', text: `Necesitarías un ${fmt(c.need)} en lo que queda. Prepara la siguiente convocatoria.` };
     case 'passed': return { tone: 'good', title: s.final ? `Aprobada con ${fmt(s.final.grade)}` : `Aprobada con ${fmt(c.points)}`, text: s.final ? S.gradeLabel(+s.final.grade, s.final.honors) : 'Ya tienes todas las notas. Pon la nota del acta cuando salga.' };
+    case 'retake': {
+      const f = c.itemFails[0];
+      return { tone: 'bad', title: 'Tienes que recuperar', text: `En ${f.item.title} sacaste ${fmt(f.grade)} y el mínimo es ${fmt(f.min)}.${c.itemFails.length > 1 ? ` Y ${c.itemFails.length - 1} más.` : ''}` };
+    }
     case 'failed': {
       const m = c.parts.find((p) => p.failsMin);
-      return { tone: 'bad', title: s.final ? `Suspensa (${fmt(s.final.grade)})` : 'Suspensa', text: m ? `No llegas a la nota mínima en ${m.comp.name} (${fmt(m.avg)} de ${fmt(m.min)}).` : 'No llegas al aprobado con estas notas.' };
+      const pr = c.periods.find((p) => p.failsMin);
+      const f = c.itemFails[0];
+      const text = s.final ? S.gradeLabel(+s.final.grade)
+        : m ? `No llegas a la nota mínima en ${m.comp.name} (${fmt(m.avg)} de ${fmt(m.min)}).`
+          : pr ? `No llegas a la mínima del ${S.PERIODS[pr.period]} (${fmt(pr.avg)} de ${fmt(pr.min)}).`
+            : f ? `En ${f.item.title} no llegas al mínimo (${fmt(f.grade)} de ${fmt(f.min)}).`
+              : 'No llegas al aprobado con estas notas.';
+      return { tone: 'bad', title: s.final ? `Suspensa (${fmt(s.final.grade)})` : 'Suspensa', text };
     }
     default: return { tone: 'muted', title: '', text: '' };
   }
@@ -478,6 +489,10 @@ function subjectCard(s) {
 
 /** Resumen corto: Teoría 6,4 · Prácticas 8,5 */
 function areaMini(c) {
+  if (c.split) {
+    return `<div class="area-mini">${c.periods.map((p) =>
+      `<span class="period"><b>${S.PERIOD_SHORT[p.period]}</b> ${p.avg == null ? '—' : fmt(p.avg)}</span>`).join('')}</div>`;
+  }
   const list = c.areas.filter((a) => a.area !== 'otro');
   if (!list.length) return '';
   return `<div class="area-mini">${list.map((a) =>
@@ -574,8 +589,24 @@ function heroHTML(s) {
         </div>`}
       </div>
     </div>
-    ${s.final ? '' : areaTiles(c)}
+    ${s.final ? '' : c.split ? periodTiles(c) : areaTiles(c)}
     </div>`;
+}
+
+/** Notas de cada cuatrimestre (anuales), con su teoría y prácticas */
+function periodTiles(c) {
+  return `
+    <div class="areas">${c.periods.map((p) => {
+      const low = p.min != null && p.avg != null && p.avg < p.min;
+      const tp = p.areas.filter((a) => a.area !== 'otro');
+      return `
+        <div class="area-tile period">
+          <span class="area-name">${S.PERIOD_SHORT[p.period]}<em>${pct(p.weight)}</em></span>
+          <strong class="t-${S.gradeTone(p.avg)}">${fmt(p.avg)}</strong>
+          <small class="${low ? 'text-bad' : ''}">${p.avg == null ? 'Sin notas' : `${pct(p.done)} evaluado`}${p.min != null ? ` · mín. ${fmt(p.min)}` : ''}</small>
+          ${tp.length > 1 ? `<small class="tp-line">${tp.map((a) => `<span class="${a.area}"><b>${S.AREAS[a.area].short}</b> ${fmt(a.avg)}</span>`).join('')}</small>` : ''}
+        </div>`;
+    }).join('')}</div>`;
 }
 
 /** Notas de teoría y prácticas por separado */
@@ -613,18 +644,20 @@ function evalTab(s) {
       </div>`;
   }
 
-  const warnings = [];
-  if (!c.weightsOk) warnings.push(`Los porcentajes suman ${fmt(c.totalW)} % en vez de 100 %. La nota se calcula en proporción.`);
-  for (const p of c.atRiskMin) warnings.push(`En ${esc(p.comp.name)} llevas ${fmt(p.avg)} y la mínima es ${fmt(p.min)}.`);
-  if (!s.final && c.need != null && c.need > 0) {
+  const warnings = [...c.weightIssues];
+  const alerts = c.itemFails.map((f) => `${esc(f.item.title)}: sacaste ${fmt(f.grade)} y el mínimo es ${fmt(f.min)}.`);
+  for (const p of c.atRiskMin) warnings.push(`En ${esc(p.name)} llevas ${fmt(p.avg)} y la mínima es ${fmt(p.min)}.`);
+  if (!s.final) {
     for (const p of c.minsPending) {
-      if (p.min > c.need && p.avg == null) warnings.push(`En ${esc(p.comp.name)} necesitas al menos un ${fmt(p.min)} aunque la media te pida menos.`);
+      const min10 = p.scale ? (p.min / p.scale) * 10 : p.min;
+      if (p.avg == null && (c.need == null || min10 > c.need)) warnings.push(`En ${esc(p.name)} necesitas al menos un ${fmt(p.min)}${c.need != null && c.need > 0 ? ' aunque la media te pida menos' : ''}.`);
     }
   }
 
   const loose = S.itemsOf(s.id).filter((i) => !i.compId || !s.comps.some((x) => x.id === i.compId));
 
   return `
+    ${alerts.map((w) => `<div class="warn bad">${I.alert}<span>${w}</span></div>`).join('')}
     ${warnings.map((w) => `<div class="warn">${I.alert}<span>${w}</span></div>`).join('')}
 
     <div class="sim-toggle ${simOn ? 'on' : ''}">
@@ -637,9 +670,15 @@ function evalTab(s) {
 
     ${compBar(c, s)}
 
-    ${c.areas.map((a) => `
-    ${c.areas.length > 1 ? `<h2 class="section-title area-head ${a.area}">${S.AREAS[a.area].label}<span class="count">${pct(a.weight)}</span></h2>` : ''}
-    <div class="stack ${c.areas.length > 1 ? '' : 'mt'}">${a.parts.map((p) => `
+    ${(c.split ? c.periods : [{ period: '', areas: c.areas }]).map((pr) => `
+    ${pr.period ? `
+      <div class="period-head">
+        <div><strong>${S.PERIODS[pr.period]}</strong><small>${pct(pr.weight)} de la nota${pr.min != null ? ` · mínimo ${fmt(pr.min)}` : ''}</small></div>
+        <span data-period-avg="${pr.period}">${gradeBadge(pr.avg, { size: 'lg' })}</span>
+      </div>` : ''}
+    ${pr.areas.map((a) => `
+    ${pr.areas.length > 1 || pr.period ? `<h2 class="section-title area-head ${a.area}">${S.AREAS[a.area].label}<span class="count">${pct(pr.period ? a.weight / (pr.weight || 1) : a.weight)}${pr.period ? ' del cuatri' : ''}</span></h2>` : ''}
+    <div class="stack ${pr.areas.length > 1 || pr.period ? '' : 'mt'}">${a.parts.map((p) => `
       <div class="card comp">
         <div class="comp-head">
           <button class="comp-title" data-action="edit-comp" data-id="${s.id}" data-c="${p.comp.id}">
@@ -652,8 +691,10 @@ function evalTab(s) {
         <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${p.comp.id}" data-k="${p.comp.kind || 'examen'}">${I.plusSm} Añadir ${addLabel(p.comp)}</button>
       </div>`).join('')}
     </div>`).join('')}
+    ${pr.period ? `<button class="add-term mt" data-action="new-comp" data-id="${s.id}" data-p="${pr.period}">${I.plusSm} Añadir apartado al ${S.PERIOD_SHORT[pr.period]}</button>` : ''}
+    `).join('')}
 
-    <button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Añadir apartado de evaluación</button>
+    ${c.split ? '' : `<button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Añadir apartado de evaluación</button>`}
 
     ${loose.length ? `
       <h2 class="section-title">No cuentan para la nota</h2>
@@ -682,13 +723,17 @@ function gradeRow(it, sim, n) {
       ? `<input class="grade-in sim" data-sim="${it.id}" value="${simVal}" placeholder="?" inputmode="decimal" enterkeyhint="done" aria-label="Nota simulada">`
       : `<input class="grade-in" data-grade="${it.id}" value="" placeholder="—" inputmode="decimal" enterkeyhint="done" aria-label="Nota">`;
   const weightNote = n > 1 && +it.weight !== 1 ? ` · peso ${fmt(it.weight)}` : '';
+  const min = it.min === '' || it.min == null ? null : +it.min;
+  const val = real ? +it.grade : sim && sim[it.id] != null ? +sim[it.id] : null;
+  const low = min != null && val != null && val < min;
+  const minNote = min != null ? ` · <span class="${low ? 'text-bad' : ''}">mín. ${fmt(min)}</span>` : '';
   return `
     <div class="grade-row">
       <button class="row-text" data-action="edit-item" data-id="${it.id}">
         <strong>${esc(it.title || S.KINDS[it.kind].label)}</strong>
-        <small>${it.date ? dayMonth(it.date) + (S.isPending(it) && it.date >= S.ymd() ? ' · ' + rel(it.date).toLowerCase() : '') : 'Sin fecha'}${weightNote}${(+it.max || 10) !== 10 ? ` · sobre ${fmt(it.max)}` : ''}</small>
+        <small>${it.date ? dayMonth(it.date) + (S.isPending(it) && it.date >= S.ymd() ? ' · ' + rel(it.date).toLowerCase() : '') : 'Sin fecha'}${minNote}${weightNote}${(+it.max || 10) !== 10 ? ` · sobre ${fmt(it.max)}` : ''}</small>
       </button>
-      ${input}
+      ${low ? input.replace('class="grade-in', 'class="grade-in bad') : input}
     </div>`;
 }
 
@@ -820,6 +865,10 @@ function refreshLive(s) {
   for (const p of c.parts) {
     const el = app.querySelector(`[data-comp-avg="${p.comp.id}"]`);
     if (el) el.innerHTML = gradeBadge(p.avg);
+  }
+  for (const p of c.periods) {
+    const el = app.querySelector(`[data-period-avg="${p.period}"]`);
+    if (el) el.innerHTML = gradeBadge(p.avg, { size: 'lg' });
   }
   const bar = app.querySelector('.tab-body .cbar');
   if (bar) bar.outerHTML = compBar(c, s);
@@ -1298,6 +1347,16 @@ function openSubjectSheet(id, term) {
     </div>
     <div class="field"><span>Cuatrimestre</span>${segPick('term', [['C1', '1.º'], ['C2', '2.º'], ['A', 'Anual']], s.term)}</div>
 
+    <div class="only-annual sub-card" ${s.term === 'A' ? '' : 'hidden'}>
+      <label class="check"><input type="checkbox" name="split" ${s.split || !id ? 'checked' : ''}><span>Nota en cada cuatrimestre</span></label>
+      <div class="tp-grid flat">
+        <span></span><b>1.er cuatri</b><b>2.º cuatri</b>
+        <small>Peso %</small>${text('p1w', fmt(s.periods?.C1?.weight ?? 50), 'inputmode="decimal"')}${text('p2w', fmt(s.periods?.C2?.weight ?? 50), 'inputmode="decimal"')}
+        <small>Mínimo</small>${text('p1m', s.periods?.C1?.min == null ? '' : fmt(s.periods.C1.min), 'inputmode="decimal" placeholder="—"')}${text('p2m', s.periods?.C2?.min == null ? '' : fmt(s.periods.C2.min), 'inputmode="decimal" placeholder="—"')}
+      </div>
+      <p class="hint">Cada cuatrimestre tiene su nota (con sus parciales y exámenes de prácticas) y la final sale de las dos. Pon la mínima si hay que sacar, por ejemplo, un 4 en cada cuatri para hacer media.</p>
+    </div>
+
     <div class="tp-grid">
       <span></span><b class="teoria">Teoría</b><b class="practicas">Prácticas</b>
       <small>Grupo</small>${text('groupT', S.groupOf(s, 'teoria'), 'placeholder="Ej. T1"')}${text('groupP', s.groupP, 'placeholder="Ej. L3"')}
@@ -1366,12 +1425,15 @@ function openItemSheet(id, preset = {}) {
 
     <div class="sub-card">
       ${field('Cuenta en la nota como', `<span id="comp-sel">${select('compId', compOptions(it.subjectId), it.compId)}</span>`)}
-      <div class="three">
+      <div class="two">
         ${field('Nota', text('grade', it.grade == null ? '' : fmt(it.grade), 'inputmode="decimal" placeholder="—"'))}
+        ${field('Nota mínima', text('min', it.min == null || it.min === '' ? '' : fmt(it.min), 'inputmode="decimal" placeholder="Sin mínimo"'))}
+      </div>
+      <div class="two">
         ${field('Sobre', text('max', fmt(it.max || 10), 'inputmode="decimal"'))}
         ${field('Peso', text('weight', fmt(it.weight || 1), 'inputmode="decimal"'))}
       </div>
-      <p class="hint">"Peso" sirve si dentro del mismo apartado unas cuentan más que otras (por ejemplo, la práctica 3 vale el doble: peso 2).</p>
+      <p class="hint">"Nota mínima": lo que tienes que sacar en esta prueba para que haga media (por ejemplo, un 4 en cada parcial). "Peso": si dentro del mismo apartado unas pruebas cuentan más que otras (la práctica 3 vale el doble: peso 2).</p>
     </div>
     <label class="check only-deliv" ${it.kind === 'practica' || it.kind === 'entrega' ? '' : 'hidden'}><input type="checkbox" name="done" ${it.done ? 'checked' : ''}><span>Entregada</span></label>
     ${field('Notas', `<textarea class="input area" name="notes" placeholder="Temario, material permitido…">${esc(it.notes)}</textarea>`)}`,
@@ -1396,22 +1458,25 @@ const placeholderFor = (k) => ({
 
 // --- Apartado de evaluación ---
 
-function openCompSheet(subjectId, compId) {
+function openCompSheet(subjectId, compId, period = 'C1') {
   const s = S.subject(subjectId);
-  const c = compId ? s.comps.find((x) => x.id === compId) : { name: '', kind: 'examen', area: 'teoria', weight: '', min: null };
-  const used = s.comps.filter((x) => x.id !== compId).reduce((a, x) => a + (+x.weight || 0), 0);
+  const split = S.isSplit(s);
+  const c = compId ? s.comps.find((x) => x.id === compId) : { name: '', kind: 'examen', area: 'teoria', weight: '', min: null, period };
+  const same = (x) => !split || S.periodOf(x) === S.periodOf(c);
+  const used = s.comps.filter((x) => x.id !== compId && same(x)).reduce((a, x) => a + (+x.weight || 0), 0);
   if (!compId) c.weight = Math.max(0, 100 - used);
   sheetCtx = { subjectId, compId };
   const kinds = Object.entries(S.KINDS).map(([k, v]) => [k, v.label]);
   openSheet(compId ? 'Editar apartado' : 'Nuevo apartado', `
     ${field('Nombre', text('name', c.name, 'placeholder="Ej. Examen de teoría, Prácticas…" autocapitalize="sentences"'))}
+    ${split ? `<div class="field"><span>Cuatrimestre</span>${segPick('period', [['C1', '1.er cuatrimestre'], ['C2', '2.º cuatrimestre']], S.periodOf(c))}</div>` : ''}
     <div class="field"><span>Pertenece a</span>${segPick('area', S.AREA_ORDER.map((a) => [a, S.AREAS[a].label]), S.areaOf(c))}</div>
     <div class="field"><span>Se evalúa con</span>${segPick('kind', kinds, c.kind || 'examen')}</div>
     <div class="two">
-      ${field('Peso en la nota (%)', text('weight', c.weight === '' ? '' : fmt(c.weight), 'inputmode="decimal"'))}
+      ${field(split ? 'Peso en el cuatri (%)' : 'Peso en la nota (%)', text('weight', c.weight === '' ? '' : fmt(c.weight), 'inputmode="decimal"'))}
       ${field('Nota mínima', text('min', c.min == null ? '' : fmt(c.min), 'inputmode="decimal" placeholder="Sin mínimo"'))}
     </div>
-    <p class="hint">El resto de apartados suman ${fmt(used)} %. Si la guía exige sacar al menos un 4 en este apartado para hacer media, pon 4 en nota mínima.</p>`,
+    <p class="hint">El resto de apartados${split ? ' de ese cuatrimestre' : ''} suman ${fmt(used)} %. Si la guía exige sacar al menos un 4 en este apartado para hacer media, pon 4 en nota mínima.</p>`,
   'save-comp',
   compId ? `<button class="btn text-danger block mt" type="button" data-action="del-comp" data-id="${subjectId}" data-c="${compId}">${I.trash} Eliminar apartado</button>` : '');
 }
@@ -1530,6 +1595,9 @@ const actions = {
     const name = box.dataset.pick;
     form.elements[name].value = el.dataset.value;
     box.querySelectorAll('[data-value]').forEach((b) => b.classList.toggle('on', b === el));
+    if (name === 'term' && form.dataset.save === 'save-subject') {
+      form.querySelector('.only-annual').hidden = el.dataset.value !== 'A';
+    }
     if (name === 'kind' && form.dataset.save === 'save-item') {
       const k = el.dataset.value;
       form.querySelector('.only-exam').hidden = k !== 'examen';
@@ -1571,6 +1639,11 @@ const actions = {
       room: d.room.trim(),
       roomP: d.roomP.trim(),
       color: d.color,
+      split: d.term === 'A' && !!d.split,
+      periods: {
+        C1: { weight: parseNum(d.p1w) ?? 50, min: parseNum(d.p1m) },
+        C2: { weight: parseNum(d.p2w) ?? 50, min: parseNum(d.p2m) },
+      },
     });
     if (isNew) {
       const wt = parseNum(d.wt) ?? 0;
@@ -1624,7 +1697,7 @@ const actions = {
     toast('Ajusta los porcentajes si tu guía es distinta');
     render();
   },
-  'new-comp': (el) => openCompSheet(el.dataset.id),
+  'new-comp': (el) => openCompSheet(el.dataset.id, null, el.dataset.p || 'C1'),
   'edit-comp': (el) => openCompSheet(el.dataset.id, el.dataset.c),
   'save-comp': () => {
     const d = formData();
@@ -1633,7 +1706,7 @@ const actions = {
     const w = parseNum(d.weight);
     if (w == null || w < 0 || w > 100) return toast('El peso va de 0 a 100');
     const min = parseNum(d.min);
-    const data = { name: d.name.trim(), kind: d.kind, area: d.area, weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
+    const data = { name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
     if (sheetCtx.compId) Object.assign(s.comps.find((c) => c.id === sheetCtx.compId), data);
     else s.comps.push({ id: S.uid(), ...data });
     S.save();
@@ -1702,6 +1775,7 @@ const actions = {
       compId: d.compId,
       grade: g,
       max,
+      min: parseNum(d.min),
       weight: parseNum(d.weight) || 1,
       done: !!d.done || (g != null && d.kind !== 'examen'),
       notes: d.notes.trim(),

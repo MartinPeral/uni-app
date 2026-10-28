@@ -776,3 +776,22 @@ body.no-tabs #tabbar { display: none; }
 .tp-grid .input { height: 44px; background-color: var(--surface); text-align: center; padding: 0 8px; }
 .legend i.lg-t, .legend i.lg-p { width: 14px; height: 10px; border-radius: 3px; background: var(--surface-3); border-left: 3px solid var(--muted); }
 .legend i.lg-p { border-left-style: dashed; background: repeating-linear-gradient(135deg, var(--surface-3) 0 3px, transparent 3px 6px); }
+
+/* ---------- Anuales por cuatrimestre y mínimos ---------- */
+
+.period { --a: var(--accent); }
+.warn.bad { background: color-mix(in srgb, var(--bad) 13%, transparent); color: var(--bad); }
+.period-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 26px 0 0; padding: 12px 14px; border-radius: 15px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+}
+.period-head strong { display: block; font-size: 17px; }
+.period-head small { color: var(--muted); font-size: 13px; }
+.period-head + .section-title { margin-top: 16px; }
+.tp-line { display: flex; gap: 10px; margin-top: 4px; }
+.tp-line span { display: inline-flex; gap: 4px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.tp-line b { color: var(--a); }
+.tp-grid.flat { background: none; padding: 10px 0 0; }
+.tp-grid.flat b { color: var(--accent); }
+.only-annual .check { padding-top: 0; }

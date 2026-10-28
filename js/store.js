@@ -186,6 +186,8 @@ export function newSubject(data = {}) {
     slots: [],
     comps: [],
     topics: [],
+    split: false,
+    periods: { C1: { weight: 50, min: null }, C2: { weight: 50, min: null } },
     final: null,
     ...data,
   };
@@ -234,6 +236,7 @@ export function newItem(data = {}) {
     call: '',
     grade: null,
     max: 10,
+    min: null,
     weight: 1,
     done: false,
     notes: '',
@@ -286,15 +289,75 @@ const wt = (i) => (Number(i.weight) > 0 ? Number(i.weight) : 1);
  * Calcula la situación de una asignatura.
  * sim: notas simuladas { itemId: nota } que no se guardan.
  */
+/** ¿La asignatura anual tiene nota por cuatrimestre? */
+export const isSplit = (s) => s.term === 'A' && !!s.split;
+
+export const PERIODS = { C1: '1.er cuatrimestre', C2: '2.º cuatrimestre' };
+export const PERIOD_SHORT = { C1: '1.er cuatri', C2: '2.º cuatri' };
+
+/** Cuatrimestre al que pertenece un apartado (solo en anuales divididas) */
+export const periodOf = (c) => (c.period === 'C2' ? 'C2' : 'C1');
+
+const numOrNull = (v) => (v === '' || v == null || Number.isNaN(+v) ? null : +v);
+
+/** Agrupa apartados y calcula su media, lo evaluado y la mínima */
+function summarize(parts, weight = null, min = null) {
+  let num = 0;
+  let den = 0;
+  let w = 0;
+  let mins = null;
+  for (const p of parts) {
+    w += p.weight;
+    if (p.min != null) mins = mins == null ? p.min : Math.max(mins, p.min);
+    if (p.avg != null) {
+      num += p.avg * p.weight * p.share;
+      den += p.weight * p.share;
+    }
+  }
+  const total = weight ?? w;
+  const avg = den ? num / den : null;
+  const complete = parts.length > 0 && parts.every((p) => p.complete);
+  return {
+    parts, weight: total, avg, done: total ? den / total : 0, complete,
+    min: min ?? mins,
+    belowMin: min != null && avg != null && avg < min,
+    failsMin: min != null && avg != null && complete && avg < min,
+  };
+}
+
+function byAreas(parts) {
+  return AREA_ORDER
+    .map((a) => ({ area: a, ...summarize(parts.filter((p) => areaOf(p.comp) === a)) }))
+    .filter((x) => x.parts.length);
+}
+
+/**
+ * Calcula la situación de una asignatura.
+ * sim: notas simuladas { itemId: nota } que no se guardan.
+ */
 export function calc(s, sim = null) {
   const pass = +state.settings.passMark || 5;
   const comps = s.comps || [];
-  const totalW = comps.reduce((a, c) => a + (+c.weight || 0), 0);
   const items = itemsOf(s.id);
+  const split = isSplit(s);
+
+  // Peso real de cada apartado en la nota final (0-1)
+  const totalW = comps.reduce((a, c) => a + (+c.weight || 0), 0);
+  const per = { C1: 0, C2: 0 };
+  for (const c of comps) per[periodOf(c)] += +c.weight || 0;
+  const pw = split ? { C1: +(s.periods?.C1?.weight ?? 50), C2: +(s.periods?.C2?.weight ?? 50) } : null;
+  const pwTotal = split ? pw.C1 + pw.C2 || 1 : 1;
+  const weightOf = (c) => {
+    if (!split) return totalW ? (+c.weight || 0) / totalW : 0;
+    const k = periodOf(c);
+    return per[k] ? (pw[k] / pwTotal) * ((+c.weight || 0) / per[k]) : 0;
+  };
 
   let points = 0; // puntos conseguidos (sobre 10)
   let doneW = 0; // peso ya evaluado (0-1)
   let simulated = false;
+  const itemFails = []; // pruebas por debajo de su nota mínima
+  const itemRisk = []; // pruebas pendientes con mínimo
 
   const parts = comps.map((c) => {
     const its = items.filter((i) => i.compId === c.id);
@@ -303,16 +366,24 @@ export function calc(s, sim = null) {
     let sum = 0;
     for (const i of its) {
       const g = grade10(i, sim);
-      if (g == null) continue;
+      const min = numOrNull(i.min);
+      if (g == null) {
+        if (min != null) itemRisk.push({ item: i, min });
+        continue;
+      }
       if (sim && sim[i.id] != null && i.grade == null) simulated = true;
+      if (min != null) {
+        const raw = sim && sim[i.id] != null ? +sim[i.id] : +i.grade;
+        if (raw < min) itemFails.push({ item: i, grade: raw, min });
+      }
       share += wt(i) / iw;
       sum += (g * wt(i)) / iw;
     }
-    const w = totalW ? (+c.weight || 0) / totalW : 0;
+    const w = weightOf(c);
     const avg = share > 0 ? sum / share : null;
     points += sum * w;
     doneW += share * w;
-    const min = c.min === '' || c.min == null ? null : +c.min;
+    const min = numOrNull(c.min);
     return {
       comp: c,
       items: its,
@@ -326,10 +397,22 @@ export function calc(s, sim = null) {
     };
   });
 
+  // Nota de cada cuatrimestre (anuales)
+  const periods = split
+    ? ['C1', 'C2'].map((k) => {
+      const ps = parts.filter((p) => periodOf(p.comp) === k);
+      const x = summarize(ps, pw[k] / pwTotal, numOrNull(s.periods?.[k]?.min));
+      return { period: k, ...x, areas: byAreas(ps) };
+    })
+    : [];
+
   const pendingW = Math.max(0, 1 - doneW);
   const current = doneW > 0 ? points / doneW : null;
-  const failsMin = parts.some((p) => p.failsMin);
-  const atRiskMin = parts.filter((p) => p.belowMin && !p.failsMin);
+  const failsMin = parts.some((p) => p.failsMin) || periods.some((p) => p.failsMin);
+  const atRiskMin = [
+    ...parts.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: p.comp.name, avg: p.avg, min: p.min })),
+    ...periods.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: PERIODS[p.period], avg: p.avg, min: p.min })),
+  ];
 
   let need = null; // media necesaria en lo que queda para aprobar
   let status;
@@ -341,41 +424,30 @@ export function calc(s, sim = null) {
     status = 'start';
     need = pass;
   } else if (pendingW < 1e-6) {
-    status = points >= pass && !failsMin ? 'passed' : 'failed';
+    status = points >= pass && !failsMin && !itemFails.length ? 'passed' : 'failed';
   } else {
     need = (pass - points) / pendingW;
     if (failsMin) status = 'failed';
+    else if (itemFails.length) status = 'retake';
     else if (need <= 0) status = 'secured';
     else if (need > 10) status = 'impossible';
     else if (need >= 7) status = 'hard';
     else status = 'ontrack';
   }
 
-  // Si algún apartado pendiente tiene nota mínima superior a la media que necesitas
-  const minsPending = parts.filter((p) => p.min != null && !p.complete);
-
-  // Resumen por bloques (teoría / prácticas / otros)
-  const byArea = {};
-  for (const p of parts) {
-    const a = areaOf(p.comp);
-    const x = byArea[a] || (byArea[a] = { area: a, weight: 0, num: 0, den: 0, min: null, parts: [] });
-    x.weight += p.weight;
-    x.parts.push(p);
-    if (p.min != null) x.min = x.min == null ? p.min : Math.max(x.min, p.min);
-    if (p.avg != null) {
-      x.num += p.avg * p.weight * p.share;
-      x.den += p.weight * p.share;
-    }
-  }
-  const areas = AREA_ORDER.filter((a) => byArea[a]).map((a) => {
-    const x = byArea[a];
-    return { ...x, avg: x.den ? x.num / x.den : null, done: x.weight ? x.den / x.weight : 0 };
-  });
+  // Mínimos que quedan por cumplir
+  const minsPending = [
+    ...parts.filter((p) => p.min != null && !p.complete).map((p) => ({ name: p.comp.name, min: p.min, avg: p.avg })),
+    ...periods.filter((p) => p.min != null && !p.complete).map((p) => ({ name: PERIODS[p.period], min: p.min, avg: p.avg })),
+    ...itemRisk.map((r) => ({ name: r.item.title, min: r.min, avg: null, scale: +r.item.max || 10 })),
+  ];
 
   return {
     parts,
+    split,
+    periods,
     totalW,
-    weightsOk: Math.abs(totalW - 100) < 0.01,
+    weightIssues: weightIssues(s, comps, per, pw),
     points,
     doneW,
     pendingW,
@@ -383,12 +455,30 @@ export function calc(s, sim = null) {
     need,
     status,
     failsMin,
+    itemFails,
     atRiskMin,
     minsPending,
-    areas,
+    areas: byAreas(parts),
     simulated,
     final: s.final ? +s.final.grade : pendingW < 1e-6 && comps.length ? points : null,
   };
+}
+
+/** Avisos si los porcentajes no suman 100 */
+function weightIssues(s, comps, per, pw) {
+  const out = [];
+  const near = (a, b) => Math.abs(a - b) < 0.01;
+  if (!comps.length) return out;
+  if (pw) {
+    if (!near(pw.C1 + pw.C2, 100)) out.push(`Los dos cuatrimestres suman ${pw.C1 + pw.C2} % en vez de 100 %.`);
+    for (const k of ['C1', 'C2']) {
+      if (per[k] && !near(per[k], 100)) out.push(`Los apartados del ${PERIODS[k]} suman ${Math.round(per[k] * 100) / 100} % en vez de 100 %.`);
+    }
+  } else {
+    const t = per.C1 + per.C2;
+    if (!near(t, 100)) out.push(`Los porcentajes suman ${Math.round(t * 100) / 100} % en vez de 100 %. La nota se calcula en proporción.`);
+  }
+  return out;
 }
 
 /** Nota que se muestra para una asignatura (final si la hay, si no la actual) */
@@ -539,10 +629,13 @@ export const PRESETS = [
 
 /** Crea la evaluación típica: un bloque de teoría y otro de prácticas */
 export function setupTheoryPractice(s, { wt = 70, wp = 30, mt = null, mp = null } = {}) {
-  const t = { id: uid(), name: 'Teoría', kind: 'examen', area: 'teoria', weight: wt, min: mt };
-  const p = { id: uid(), name: 'Prácticas', kind: 'practica', area: 'practicas', weight: wp, min: mp };
-  s.comps = [t, p].filter((c) => +c.weight > 0);
-  if (+wt > 0) state.items.push(newItem({ subjectId: s.id, compId: t.id, kind: 'examen', title: 'Examen de teoría' }));
+  const make = (period, label) => {
+    const t = { id: uid(), name: 'Teoría', kind: 'examen', area: 'teoria', weight: wt, min: mt, period };
+    const p = { id: uid(), name: 'Prácticas', kind: 'practica', area: 'practicas', weight: wp, min: mp, period };
+    if (+wt > 0) state.items.push(newItem({ subjectId: s.id, compId: t.id, kind: 'examen', title: label ? `Parcial de teoría (${label})` : 'Examen de teoría', call: label ? 'Parcial' : '' }));
+    return [t, p].filter((c) => +c.weight > 0);
+  };
+  s.comps = isSplit(s) ? [...make('C1', '1.er cuatri'), ...make('C2', '2.º cuatri')] : make('', '');
 }
 
 export function applyPreset(s, preset) {
@@ -632,6 +725,34 @@ export function loadDemo() {
       { day: 3, start: '12:30', end: '14:30', type: 'Laboratorio', room: 'L0.02' },
     ],
   );
+
+  // Asignatura anual con nota en cada cuatrimestre
+  const pa = newSubject({
+    name: 'Programación Avanzada', short: 'PA', color: PALETTE[4], credits: 12, year: 2, term: 'A', academicYear: year,
+    room: 'A0.30', roomP: 'L1.10', groupT: 'T1', groupP: 'L2', split: true,
+    periods: { C1: { weight: 50, min: 4 }, C2: { weight: 50, min: 4 } },
+  });
+  const pc = (period, name, kind, area, weight) => ({ id: uid(), name, kind, area, weight, min: null, period });
+  pa.comps = [
+    pc('C1', 'Parciales de teoría', 'examen', 'teoria', 60), pc('C1', 'Exámenes de prácticas', 'practica', 'practicas', 40),
+    pc('C2', 'Parciales de teoría', 'examen', 'teoria', 60), pc('C2', 'Exámenes de prácticas', 'practica', 'practicas', 40),
+  ];
+  pa.slots = [
+    { id: uid(), day: 2, start: '09:00', end: '11:00', type: 'Teoría', room: 'A0.30', group: '' },
+    { id: uid(), day: 4, start: '11:00', end: '13:00', type: 'Prácticas', room: 'L1.10', group: '' },
+  ];
+  state.subjects.push(pa);
+  [
+    [0, 'examen', 'Primer parcial', d(-10), 5.8, 4],
+    [0, 'examen', 'Segundo parcial', d(30), null, 4],
+    [1, 'practica', 'Examen de prácticas 1', d(-2), 7.5, null],
+    [1, 'practica', 'Examen de prácticas 2', d(24), null, null],
+    [2, 'examen', 'Tercer parcial', d(110), null, 4],
+    [3, 'practica', 'Examen de prácticas 3', d(100), null, null],
+  ].forEach(([ci, kind, title, date, grade, min]) => state.items.push(newItem({
+    subjectId: pa.id, compId: pa.comps[ci].id, kind, title, date, time: kind === 'examen' ? '10:00' : '11:00',
+    grade, min, done: grade != null, call: kind === 'examen' ? 'Parcial' : '',
+  })));
 
   // Asignaturas ya superadas del curso anterior
   const prev = academicYear(new Date(t.getFullYear() - 1, t.getMonth(), 1));
