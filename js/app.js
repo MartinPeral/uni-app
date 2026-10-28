@@ -4,7 +4,7 @@
 
 import * as S from './store.js';
 
-const APP_VERSION = '1.1';
+const APP_VERSION = '1.2';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -207,10 +207,10 @@ function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
   return `
     <svg class="ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true">
       <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${stroke}"/>
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-opacity=".28" stroke-width="${stroke}"
-        stroke-dasharray="${(done + pending) * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>
-      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
-        stroke-dasharray="${done * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>
+      ${done + pending > 0.005 ? `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-opacity=".28" stroke-width="${stroke}"
+        stroke-dasharray="${(done + pending) * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>` : ''}
+      ${done > 0.005 ? `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
+        stroke-dasharray="${done * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>` : ''}
       ${tick(pass)}
     </svg>`;
 }
@@ -284,6 +284,9 @@ const fab = () => `<button class="fab" data-action="quick-add" aria-label="Añad
 //  INICIO
 // =============================================================
 
+/** Grupo de una clase: el suyo o el de la asignatura para ese bloque */
+const slotGroup = (c) => c.slot.group || S.groupOf(c.s, S.slotArea(c.slot.type));
+
 function nowCard() {
   const now = new Date();
   const m = now.getHours() * 60 + now.getMinutes();
@@ -291,7 +294,7 @@ function nowCard() {
   const cur = today.find((c) => m >= S.minutes(c.slot.start) && m < S.minutes(c.slot.end));
   const next = today.find((c) => S.minutes(c.slot.start) > m);
 
-  const slotLine = (c) => `${esc(c.slot.type || 'Clase')}${c.slot.room ? ' · ' + esc(c.slot.room) : ''}`;
+  const slotLine = (c) => `${esc(c.slot.type || 'Clase')}${c.slot.room ? ' · ' + esc(c.slot.room) : ''}${slotGroup(c) ? ' · ' + esc(slotGroup(c)) : ''}`;
 
   if (cur) {
     const a = S.minutes(cur.slot.start);
@@ -345,7 +348,7 @@ function todayList() {
         <a class="tl-row ${past ? 'past' : ''}" href="#/asignatura/${c.s.id}" style="--c:${subjColor(c.s)}">
           <span class="tl-time"><b>${c.slot.start}</b><small>${c.slot.end}</small></span>
           <span class="tl-bar"></span>
-          <span class="row-text"><strong>${esc(c.s.name)}</strong><small>${esc(c.slot.type || '')}${c.slot.room ? ' · ' + esc(c.slot.room) : ''}${c.slot.group ? ' · Grupo ' + esc(c.slot.group) : ''}</small></span>
+          <span class="row-text"><strong>${esc(c.s.name)}</strong><small>${esc(c.slot.type || '')}${c.slot.room ? ' · ' + esc(c.slot.room) : ''}${slotGroup(c) ? ' · Grupo ' + esc(slotGroup(c)) : ''}</small></span>
         </a>`;
     }).join('')}</div>`;
 }
@@ -465,11 +468,20 @@ function subjectCard(s) {
         ${gradeBadge(g, { honors: s.final?.honors, size: 'lg' })}
       </div>
       ${s.final ? '' : compBar(c, s)}
+      ${s.final ? '' : areaMini(c)}
       <div class="subj-foot">
         <span class="tone-${info.tone}">${esc(info.title)}</span>
         ${next ? `<span class="muted">${S.KINDS[next.kind].label} · ${rel(next.date).toLowerCase()}</span>` : ''}
       </div>
     </a>`;
+}
+
+/** Resumen corto: Teoría 6,4 · Prácticas 8,5 */
+function areaMini(c) {
+  const list = c.areas.filter((a) => a.area !== 'otro');
+  if (!list.length) return '';
+  return `<div class="area-mini">${list.map((a) =>
+    `<span class="${a.area}"><b>${S.AREAS[a.area].label}</b> ${a.avg == null ? '—' : fmt(a.avg)}</span>`).join('')}</div>`;
 }
 
 const byName = (a, b) => a.year - b.year || a.name.localeCompare(b.name);
@@ -543,7 +555,8 @@ function heroHTML(s) {
   const info = statusInfo(s, c);
   const g = s.final ? +s.final.grade : c.current;
   return `
-    <div class="card hero" id="subj-hero" style="--c:${subjColor(s)}">
+    <div id="subj-hero">
+    <div class="card hero" style="--c:${subjColor(s)}">
       <div class="hero-ring">
         ${ring(s.final ? { points: +s.final.grade, pendingW: 0 } : c, { color: subjColor(s) })}
         <div class="ring-label">
@@ -560,7 +573,25 @@ function heroHTML(s) {
           <span><b>${pct(c.doneW)}</b> evaluado</span>
         </div>`}
       </div>
+    </div>
+    ${s.final ? '' : areaTiles(c)}
     </div>`;
+}
+
+/** Notas de teoría y prácticas por separado */
+function areaTiles(c) {
+  const list = c.areas.filter((a) => a.area !== 'otro' || c.areas.length === 1);
+  if (!list.length || (list.length === 1 && list[0].area === 'otro')) return '';
+  return `
+    <div class="areas">${list.map((a) => {
+      const low = a.min != null && a.avg != null && a.avg < a.min;
+      return `
+        <div class="area-tile ${a.area}">
+          <span class="area-name">${S.AREAS[a.area].label}<em>${pct(a.weight)}</em></span>
+          <strong class="t-${S.gradeTone(a.avg)}">${fmt(a.avg)}</strong>
+          <small class="${low ? 'text-bad' : ''}">${a.avg == null ? 'Sin notas' : `${pct(a.done)} evaluado`}${a.min != null ? ` · mín. ${fmt(a.min)}` : ''}</small>
+        </div>`;
+    }).join('')}</div>`;
 }
 
 function evalTab(s) {
@@ -571,7 +602,7 @@ function evalTab(s) {
     return `
       <div class="card">
         <p class="card-title">¿Cómo se evalúa?</p>
-        <p class="muted small">Elige una plantilla y ajusta los porcentajes a lo que diga la guía docente, o créala desde cero.</p>
+        <p class="muted small">Lo normal es teoría y prácticas. Elige una plantilla y ajusta los porcentajes a lo que diga la guía docente, o créala desde cero.</p>
         <div class="presets">${S.PRESETS.map((p, i) => `
           <button class="preset" data-action="apply-preset" data-id="${s.id}" data-i="${i}">
             <strong>${p.name}</strong>
@@ -606,7 +637,9 @@ function evalTab(s) {
 
     ${compBar(c, s)}
 
-    <div class="stack mt">${c.parts.map((p) => `
+    ${c.areas.map((a) => `
+    ${c.areas.length > 1 ? `<h2 class="section-title area-head ${a.area}">${S.AREAS[a.area].label}<span class="count">${pct(a.weight)}</span></h2>` : ''}
+    <div class="stack ${c.areas.length > 1 ? '' : 'mt'}">${a.parts.map((p) => `
       <div class="card comp">
         <div class="comp-head">
           <button class="comp-title" data-action="edit-comp" data-id="${s.id}" data-c="${p.comp.id}">
@@ -616,9 +649,9 @@ function evalTab(s) {
           <span class="comp-avg" data-comp-avg="${p.comp.id}">${gradeBadge(p.avg)}</span>
         </div>
         ${p.items.length ? `<div class="comp-items">${p.items.sort(S.byDate).map((it) => gradeRow(it, sim, p.items.length)).join('')}</div>` : '<p class="muted small">Sin evaluables. Añade el examen o las prácticas de este apartado.</p>'}
-        <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${p.comp.id}" data-k="${p.comp.kind || 'examen'}">${I.plusSm} Añadir</button>
+        <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${p.comp.id}" data-k="${p.comp.kind || 'examen'}">${I.plusSm} Añadir ${addLabel(p.comp)}</button>
       </div>`).join('')}
-    </div>
+    </div>`).join('')}
 
     <button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Añadir apartado de evaluación</button>
 
@@ -636,6 +669,9 @@ function evalTab(s) {
       <button class="btn block ${c.pendingW < 1e-6 && c.parts.length ? 'primary' : ''}" data-action="final" data-id="${s.id}">Poner nota del acta</button>
       <p class="hint">Cuando tengas la nota oficial, ponla aquí. La asignatura pasa a tu expediente.</p>`}`;
 }
+
+/** Texto del botón para añadir un evaluable a un apartado */
+const addLabel = (c) => ({ examen: 'examen', practica: 'práctica', entrega: 'entrega', otro: 'nota' }[c.kind] || '');
 
 function gradeRow(it, sim, n) {
   const real = it.grade != null && it.grade !== '';
@@ -674,21 +710,31 @@ function datesTab(s) {
 
 function scheduleTab(s) {
   const slots = [...(s.slots || [])].sort((a, b) => a.day - b.day || S.minutes(a.start) - S.minutes(b.start));
-  const hours = slots.reduce((a, x) => a + (S.minutes(x.end) - S.minutes(x.start)) / 60, 0);
-  return `
-    ${slots.length ? `
-      <div class="card flush">${slots.map((x) => `
+  const hrs = (list) => list.reduce((a, x) => a + (S.minutes(x.end) - S.minutes(x.start)) / 60, 0);
+  const section = (area) => {
+    const list = slots.filter((x) => S.slotArea(x.type) === area);
+    if (area === 'otro' && !list.length) return '';
+    const group = S.groupOf(s, area);
+    return `
+      <h2 class="section-title area-head ${area}">${area === 'otro' ? 'Otras clases' : S.AREAS[area].label}
+        ${group ? `<span class="count">Grupo ${esc(group)}</span>` : ''}
+        ${list.length ? `<span class="count right">${fmt(hrs(list), 1)} h/sem</span>` : ''}
+      </h2>
+      ${list.length ? `<div class="card flush">${list.map((x) => `
         <button class="tl-row" data-action="edit-slot" data-id="${s.id}" data-x="${x.id}" style="--c:${subjColor(s)}">
           <span class="tl-time"><b>${S.DAYS[x.day - 1].slice(0, 3)}</b><small>${x.start}</small></span>
-          <span class="tl-bar"></span>
-          <span class="row-text"><strong>${esc(x.type || 'Clase')} · ${x.start}–${x.end}</strong>
-          <small>${[x.room && esc(x.room), x.group && 'Grupo ' + esc(x.group)].filter(Boolean).join(' · ') || 'Sin aula'}</small></span>
+          <span class="tl-bar ${area}"></span>
+          <span class="row-text"><strong>${x.start}–${x.end}${area === 'otro' || x.type === 'Laboratorio' ? ' · ' + esc(x.type) : ''}</strong>
+          <small>${[x.room && esc(x.room), x.group && x.group !== group && 'Grupo ' + esc(x.group)].filter(Boolean).join(' · ') || 'Sin aula'}</small></span>
           ${I.chevron}
         </button>`).join('')}
-      </div>
-      <p class="hint">${fmt(hours, 1)} h de clase a la semana · ${S.TERMS[s.term]}${s.final ? ' (asignatura cerrada)' : S.inCurrentTerm(s) ? '' : ' (no es el cuatrimestre actual)'}</p>`
-      : '<p class="hint">Añade tus clases para ver tu horario semanal y saber cuándo te toca.</p>'}
-    <button class="btn ghost block mt" data-action="new-slot" data-id="${s.id}">${I.plusSm} Añadir clase</button>`;
+      </div>` : ''}
+      ${area === 'otro' ? '' : `<button class="add-term ${list.length ? 'mt' : ''}" data-action="new-slot" data-id="${s.id}" data-area="${area}">${I.plusSm} Añadir clase de ${area === 'teoria' ? 'teoría' : 'prácticas'}</button>`}`;
+  };
+  return `
+    ${S.AREA_ORDER.map(section).join('')}
+    <p class="hint">${slots.length ? `${fmt(hrs(slots), 1)} h de clase a la semana · ` : ''}${S.TERMS[s.term]}${s.final ? ' (asignatura cerrada)' : S.inCurrentTerm(s) ? '' : S.isThisYear(s) ? ' (no es el cuatrimestre actual)' : ' (no es de este curso)'}</p>
+    <p class="hint">Los grupos de teoría y prácticas se cambian editando la asignatura (lápiz de arriba).</p>`;
 }
 
 function infoTab(s) {
@@ -883,9 +929,9 @@ function agendaWeek() {
       const top = px(S.minutes(x.slot.start));
       const h = Math.max(22, px(S.minutes(x.slot.end)) - top);
       return `
-        <a class="wk-block" href="#/asignatura/${x.s.id}" style="--c:${subjColor(x.s)};top:${top}px;height:${h - 2}px">
+        <a class="wk-block ${S.slotArea(x.slot.type)}" href="#/asignatura/${x.s.id}" style="--c:${subjColor(x.s)};top:${top}px;height:${h - 2}px">
           <b>${esc(S.shortName(x.s))}</b>
-          ${h > 40 ? `<small>${esc(x.slot.type || '')}</small>` : ''}
+          ${h > 40 ? `<small>${esc({ teoria: 'Teoría', practicas: 'Práct.' }[S.slotArea(x.slot.type)] || x.slot.type)}</small>` : ''}
           ${h > 58 && x.slot.room ? `<small>${esc(x.slot.room)}</small>` : ''}
         </a>`;
     }).join('');
@@ -910,6 +956,7 @@ function agendaWeek() {
         <div class="wk-hours" style="height:${height}px">${hours.slice(0, -1).map((m) => `<span style="top:${px(m)}px">${m / 60}</span>`).join('')}</div>
         ${days.slice(0, cols).map(col).join('')}
       </div>
+      <div class="legend"><span><i class="lg-t"></i>Teoría</span><span><i class="lg-p"></i>Prácticas</span></div>
     </div>
     ${weekItems.length ? `<h2 class="section-title">Esta semana <span class="count">${weekItems.length}</span></h2>
       <div class="card flush">${weekItems.map((i) => itemRow(i)).join('')}</div>` : ''}`;
@@ -1247,13 +1294,20 @@ function openSubjectSheet(id, term) {
     <div class="three">
       ${field('Créditos', text('credits', fmt(s.credits, 1), 'inputmode="decimal"'))}
       ${field('Curso', select('year', years, s.year))}
-      ${field('Grupo', text('group', s.group, 'placeholder="—"'))}
+      ${field('Curso acad.', text('academicYear', s.academicYear, 'placeholder="2026/27"'))}
     </div>
     <div class="field"><span>Cuatrimestre</span>${segPick('term', [['C1', '1.º'], ['C2', '2.º'], ['A', 'Anual']], s.term)}</div>
-    <div class="two">
-      ${field('Curso académico', text('academicYear', s.academicYear, 'placeholder="2026/27"'))}
-      ${field('Aula habitual', text('room', s.room, 'placeholder="Opcional"'))}
+
+    <div class="tp-grid">
+      <span></span><b class="teoria">Teoría</b><b class="practicas">Prácticas</b>
+      <small>Grupo</small>${text('groupT', S.groupOf(s, 'teoria'), 'placeholder="Ej. T1"')}${text('groupP', s.groupP, 'placeholder="Ej. L3"')}
+      <small>Aula</small>${text('room', s.room, 'placeholder="Ej. A3.10"')}${text('roomP', s.roomP, 'placeholder="Ej. L2.05"')}
+      ${id ? '' : `
+      <small>Peso %</small>${text('wt', '70', 'inputmode="decimal"')}${text('wp', '30', 'inputmode="decimal"')}
+      <small>Mínimo</small>${text('mt', '', 'inputmode="decimal" placeholder="—"')}${text('mp', '', 'inputmode="decimal" placeholder="—"')}`}
     </div>
+    ${id ? '' : '<p class="hint">Pon el peso de teoría y prácticas en la nota final según la guía docente, y la nota mínima si la hay para hacer media. Si se evalúa de otra forma, deja prácticas a 0 y lo cambias luego en Evaluación.</p>'}
+
     <div class="field"><span>Color</span>${swatches(s.color)}</div>`, 'save-subject');
 }
 
@@ -1289,9 +1343,7 @@ function openItemSheet(id, preset = {}) {
     it.subjectId = r.name === 'asignatura' ? r.id : (S.activeSubjects()[0]?.id || S.state.subjects[0]?.id || '');
   }
   if (!id && !it.compId) {
-    // Elige el apartado que mejor encaja con el tipo
-    const s = S.subject(it.subjectId);
-    it.compId = s?.comps.find((c) => c.kind === it.kind)?.id || '';
+    it.compId = defaultComp(S.subject(it.subjectId), it.kind);
   }
   sheetCtx = { id };
   const subs = S.state.subjects.filter((s) => !s.final || s.id === it.subjectId).map((s) => [s.id, s.name]);
@@ -1331,6 +1383,13 @@ function openItemSheet(id, preset = {}) {
     </div>` : '');
 }
 
+/** Apartado que mejor encaja con el tipo: el del mismo tipo o el del mismo bloque */
+function defaultComp(s, kind) {
+  if (!s) return '';
+  const area = kind === 'examen' ? 'teoria' : kind === 'otro' ? 'otro' : 'practicas';
+  return (s.comps.find((c) => c.kind === kind) || s.comps.find((c) => S.areaOf(c) === area))?.id || '';
+}
+
 const placeholderFor = (k) => ({
   examen: 'Ej. Primer parcial', practica: 'Ej. Práctica 2 · Árboles', entrega: 'Ej. Memoria del proyecto', otro: 'Ej. Exposición en clase',
 }[k]);
@@ -1339,14 +1398,15 @@ const placeholderFor = (k) => ({
 
 function openCompSheet(subjectId, compId) {
   const s = S.subject(subjectId);
-  const c = compId ? s.comps.find((x) => x.id === compId) : { name: '', kind: 'examen', weight: '', min: null };
+  const c = compId ? s.comps.find((x) => x.id === compId) : { name: '', kind: 'examen', area: 'teoria', weight: '', min: null };
   const used = s.comps.filter((x) => x.id !== compId).reduce((a, x) => a + (+x.weight || 0), 0);
   if (!compId) c.weight = Math.max(0, 100 - used);
   sheetCtx = { subjectId, compId };
   const kinds = Object.entries(S.KINDS).map(([k, v]) => [k, v.label]);
   openSheet(compId ? 'Editar apartado' : 'Nuevo apartado', `
     ${field('Nombre', text('name', c.name, 'placeholder="Ej. Examen de teoría, Prácticas…" autocapitalize="sentences"'))}
-    <div class="field"><span>Tipo</span>${segPick('kind', kinds, c.kind || 'examen')}</div>
+    <div class="field"><span>Pertenece a</span>${segPick('area', S.AREA_ORDER.map((a) => [a, S.AREAS[a].label]), S.areaOf(c))}</div>
+    <div class="field"><span>Se evalúa con</span>${segPick('kind', kinds, c.kind || 'examen')}</div>
     <div class="two">
       ${field('Peso en la nota (%)', text('weight', c.weight === '' ? '' : fmt(c.weight), 'inputmode="decimal"'))}
       ${field('Nota mínima', text('min', c.min == null ? '' : fmt(c.min), 'inputmode="decimal" placeholder="Sin mínimo"'))}
@@ -1358,13 +1418,21 @@ function openCompSheet(subjectId, compId) {
 
 // --- Clase del horario ---
 
-function openSlotSheet(subjectId, slotId) {
+function openSlotSheet(subjectId, slotId, area = 'teoria') {
   const s = S.subject(subjectId);
-  const last = s.slots[s.slots.length - 1];
+  const same = s.slots.filter((y) => S.slotArea(y.type) === area);
+  const last = same[same.length - 1];
   const x = slotId ? s.slots.find((y) => y.id === slotId)
-    : { day: last ? Math.min(5, +last.day + 1) : 1, start: last?.start || '09:00', end: last?.end || '10:30', type: 'Teoría', room: s.room || '', group: s.group || '' };
+    : {
+      day: last ? Math.min(5, +last.day + 1) : 1,
+      start: last?.start || '09:00',
+      end: last?.end || (area === 'practicas' ? '11:00' : '10:30'),
+      type: area === 'practicas' ? 'Prácticas' : 'Teoría',
+      room: area === 'practicas' ? s.roomP || '' : s.room || '',
+      group: '',
+    };
   sheetCtx = { subjectId, slotId };
-  openSheet(slotId ? 'Editar clase' : 'Nueva clase', `
+  openSheet(slotId ? 'Editar clase' : `Nueva clase de ${area === 'practicas' ? 'prácticas' : 'teoría'}`, `
     <div class="field"><span>Día</span>${segPick('day', [1, 2, 3, 4, 5, 6].map((d) => [d, S.DAYS_SHORT[d - 1]]), x.day)}</div>
     <div class="two">
       ${field('Empieza', `<input class="input" type="time" name="start" value="${esc(x.start)}">`)}
@@ -1373,7 +1441,7 @@ function openSlotSheet(subjectId, slotId) {
     ${field('Tipo', select('type', S.SLOT_TYPES.map((t) => [t, t]), x.type))}
     <div class="two">
       ${field('Aula', text('room', x.room, 'placeholder="Ej. A3.10"'))}
-      ${field('Grupo', text('group', x.group, 'placeholder="Opcional"'))}
+      ${field('Grupo', text('group', x.group, `placeholder="${esc(S.groupOf(s, S.slotArea(x.type)) || 'El de la asignatura')}"`))}
     </div>`,
   'save-slot',
   slotId ? `<button class="btn text-danger block mt" type="button" data-action="del-slot" data-id="${subjectId}" data-x="${slotId}">${I.trash} Eliminar clase</button>` : '');
@@ -1468,9 +1536,8 @@ const actions = {
       form.querySelector('.only-deliv').hidden = !(k === 'practica' || k === 'entrega');
       form.elements.title.placeholder = placeholderFor(k);
       // Ajusta el apartado al tipo si no se ha tocado
-      const s = S.subject(form.elements.subjectId.value);
-      const match = s?.comps.find((c) => c.kind === k);
-      if (match && !sheetCtx?.id) form.elements.compId.value = match.id;
+      const match = defaultComp(S.subject(form.elements.subjectId.value), k);
+      if (match && !sheetCtx?.id) form.elements.compId.value = match;
     }
   },
   'clear-date': (el) => {
@@ -1498,11 +1565,19 @@ const actions = {
       year: +d.year,
       term: d.term,
       academicYear: d.academicYear.trim(),
-      group: d.group.trim(),
+      group: '',
+      groupT: d.groupT.trim(),
+      groupP: d.groupP.trim(),
       room: d.room.trim(),
+      roomP: d.roomP.trim(),
       color: d.color,
     });
-    if (isNew) S.state.subjects.push(s);
+    if (isNew) {
+      const wt = parseNum(d.wt) ?? 0;
+      const wp = parseNum(d.wp) ?? 0;
+      if (wt + wp > 0) S.setupTheoryPractice(s, { wt, wp, mt: parseNum(d.mt), mp: parseNum(d.mp) });
+      S.state.subjects.push(s);
+    }
     S.save();
     closeOverlay();
     if (isNew) {
@@ -1558,7 +1633,7 @@ const actions = {
     const w = parseNum(d.weight);
     if (w == null || w < 0 || w > 100) return toast('El peso va de 0 a 100');
     const min = parseNum(d.min);
-    const data = { name: d.name.trim(), kind: d.kind, weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
+    const data = { name: d.name.trim(), kind: d.kind, area: d.area, weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
     if (sheetCtx.compId) Object.assign(s.comps.find((c) => c.id === sheetCtx.compId), data);
     else s.comps.push({ id: S.uid(), ...data });
     S.save();
@@ -1659,7 +1734,7 @@ const actions = {
   },
 
   // --- Horario ---
-  'new-slot': (el) => openSlotSheet(el.dataset.id),
+  'new-slot': (el) => openSlotSheet(el.dataset.id, null, el.dataset.area || 'teoria'),
   'edit-slot': (el) => openSlotSheet(el.dataset.id, el.dataset.x),
   'save-slot': () => {
     const d = formData();
@@ -1871,8 +1946,7 @@ document.addEventListener('change', async (e) => {
     const form = t.closest('form');
     const kind = form.elements.kind.value;
     const opts = compOptions(t.value);
-    const s = S.subject(t.value);
-    const pickId = s?.comps.find((c) => c.kind === kind)?.id || '';
+    const pickId = defaultComp(S.subject(t.value), kind);
     document.getElementById('comp-sel').innerHTML = select('compId', opts, pickId);
     return;
   }

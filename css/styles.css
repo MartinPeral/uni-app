@@ -18,6 +18,8 @@
   --top: #b28cff;
   --gold: #ffcc4d;
   --mh: #ff7ac6;
+  --a-teoria: #7c9cff;
+  --a-practicas: #2dd4bf;
   --k-examen: #ff6b8b;
   --k-practica: #60a5fa;
   --k-entrega: #f5b942;
@@ -48,6 +50,8 @@
     --top: #8b5cf6;
     --gold: #d29a00;
     --mh: #e0479e;
+    --a-teoria: #4b6cf5;
+    --a-practicas: #0d9488;
     --k-examen: #e5486b;
     --k-practica: #2f80ed;
     --k-entrega: #d48c00;
@@ -73,6 +77,8 @@
   --top: #8b5cf6;
   --gold: #d29a00;
   --mh: #e0479e;
+  --a-teoria: #4b6cf5;
+  --a-practicas: #0d9488;
   --k-examen: #e5486b;
   --k-practica: #2f80ed;
   --k-entrega: #d48c00;
@@ -723,3 +729,50 @@ body.no-tabs #tabbar { display: none; }
   color: var(--muted); font-weight: 600; font-size: 14.5px;
 }
 .add-term:active { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Teoría y prácticas ---------- */
+
+.teoria { --a: var(--a-teoria); }
+.practicas { --a: var(--a-practicas); }
+.otro { --a: var(--muted); }
+
+.areas { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.area-tile {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; position: relative; overflow: hidden;
+}
+.area-tile::before { content: ''; position: absolute; left: 0; top: 0; right: 0; height: 3px; background: var(--a); }
+.area-name { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 800; color: var(--a); text-transform: uppercase; letter-spacing: .05em; }
+.area-name em { font-style: normal; color: var(--muted); font-weight: 700; letter-spacing: 0; }
+.area-tile strong { font-size: 28px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.area-tile small { font-size: 12.5px; color: var(--muted); }
+
+.area-head::before { content: ''; width: 9px; height: 9px; border-radius: 3px; background: var(--a); }
+.section-title .count.right { margin-left: auto; }
+
+.area-mini { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.area-mini span {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 13px; font-variant-numeric: tabular-nums;
+  background: var(--surface-2); border-radius: 8px; padding: 4px 9px; font-weight: 700;
+}
+.area-mini b { color: var(--a); font-weight: 700; }
+
+.tl-bar.practicas {
+  background: repeating-linear-gradient(180deg, var(--c) 0 5px, transparent 5px 8px);
+}
+.wk-block.practicas {
+  border-left-style: dashed;
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 14%, transparent) 0 6px, transparent 6px 12px),
+    color-mix(in srgb, var(--c) 16%, var(--surface));
+}
+
+.tp-grid {
+  display: grid; grid-template-columns: 62px 1fr 1fr; gap: 8px 10px; align-items: center;
+  background: var(--surface-2); border-radius: 15px; padding: 12px;
+}
+.tp-grid b { text-align: center; font-size: 13px; color: var(--a); text-transform: uppercase; letter-spacing: .05em; }
+.tp-grid small { font-size: 13px; color: var(--muted); font-weight: 600; }
+.tp-grid .input { height: 44px; background-color: var(--surface); text-align: center; padding: 0 8px; }
+.legend i.lg-t, .legend i.lg-p { width: 14px; height: 10px; border-radius: 3px; background: var(--surface-3); border-left: 3px solid var(--muted); }
+.legend i.lg-p { border-left-style: dashed; background: repeating-linear-gradient(135deg, var(--surface-3) 0 3px, transparent 3px 6px); }

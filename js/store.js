@@ -30,6 +30,26 @@ export const KINDS = {
 /** Tipos de clase del horario */
 export const SLOT_TYPES = ['Teoría', 'Prácticas', 'Laboratorio', 'Seminario', 'Tutoría'];
 
+/** Bloques de una asignatura: teoría, prácticas y lo demás */
+export const AREAS = {
+  teoria: { label: 'Teoría', short: 'T' },
+  practicas: { label: 'Prácticas', short: 'P' },
+  otro: { label: 'Otros', short: 'O' },
+};
+export const AREA_ORDER = ['teoria', 'practicas', 'otro'];
+
+/** Bloque al que pertenece un apartado de evaluación */
+export const areaOf = (c) =>
+  c.area || (c.kind === 'examen' ? 'teoria' : c.kind === 'practica' || c.kind === 'entrega' ? 'practicas' : 'otro');
+
+/** Bloque al que pertenece una clase del horario */
+export const slotArea = (type = '') =>
+  type === 'Teoría' ? 'teoria' : type === 'Prácticas' || type === 'Laboratorio' ? 'practicas' : 'otro';
+
+/** Grupo de una asignatura para teoría o prácticas */
+export const groupOf = (s, area) =>
+  area === 'practicas' ? s.groupP || '' : s.groupT || s.group || '';
+
 /** Convocatorias habituales */
 export const CALLS = ['Parcial', 'Primera convocatoria', 'Segunda convocatoria', 'Tercera convocatoria', 'Extraordinaria'];
 
@@ -156,7 +176,10 @@ export function newSubject(data = {}) {
     term: currentTerm(),
     academicYear: academicYear(),
     group: '',
+    groupT: '',
+    groupP: '',
     room: '',
+    roomP: '',
     teachers: [],
     links: [],
     notes: '',
@@ -331,6 +354,24 @@ export function calc(s, sim = null) {
   // Si algún apartado pendiente tiene nota mínima superior a la media que necesitas
   const minsPending = parts.filter((p) => p.min != null && !p.complete);
 
+  // Resumen por bloques (teoría / prácticas / otros)
+  const byArea = {};
+  for (const p of parts) {
+    const a = areaOf(p.comp);
+    const x = byArea[a] || (byArea[a] = { area: a, weight: 0, num: 0, den: 0, min: null, parts: [] });
+    x.weight += p.weight;
+    x.parts.push(p);
+    if (p.min != null) x.min = x.min == null ? p.min : Math.max(x.min, p.min);
+    if (p.avg != null) {
+      x.num += p.avg * p.weight * p.share;
+      x.den += p.weight * p.share;
+    }
+  }
+  const areas = AREA_ORDER.filter((a) => byArea[a]).map((a) => {
+    const x = byArea[a];
+    return { ...x, avg: x.den ? x.num / x.den : null, done: x.weight ? x.den / x.weight : 0 };
+  });
+
   return {
     parts,
     totalW,
@@ -344,6 +385,7 @@ export function calc(s, sim = null) {
     failsMin,
     atRiskMin,
     minsPending,
+    areas,
     simulated,
     final: s.final ? +s.final.grade : pendingW < 1e-6 && comps.length ? points : null,
   };
@@ -468,32 +510,40 @@ export function toICS(list = state.items.filter((i) => i.date)) {
 
 export const PRESETS = [
   {
-    name: 'Examen final',
-    comps: [{ name: 'Examen final', kind: 'examen', weight: 100, min: null }],
+    name: 'Solo examen',
+    comps: [{ name: 'Examen final', kind: 'examen', area: 'teoria', weight: 100, min: null }],
   },
   {
     name: 'Teoría + prácticas',
     comps: [
-      { name: 'Examen de teoría', kind: 'examen', weight: 70, min: 4 },
-      { name: 'Prácticas', kind: 'practica', weight: 30, min: null },
+      { name: 'Teoría', kind: 'examen', area: 'teoria', weight: 70, min: 4 },
+      { name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 30, min: 4 },
     ],
   },
   {
     name: 'Dos parciales + prácticas',
     comps: [
-      { name: 'Parciales', kind: 'examen', weight: 60, min: 4 },
-      { name: 'Prácticas', kind: 'practica', weight: 30, min: null },
-      { name: 'Participación', kind: 'otro', weight: 10, min: null },
+      { name: 'Parciales', kind: 'examen', area: 'teoria', weight: 60, min: 4 },
+      { name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 30, min: null },
+      { name: 'Participación', kind: 'otro', area: 'otro', weight: 10, min: null },
     ],
   },
   {
     name: 'Proyecto',
     comps: [
-      { name: 'Examen', kind: 'examen', weight: 50, min: 4 },
-      { name: 'Proyecto', kind: 'entrega', weight: 50, min: 5 },
+      { name: 'Examen', kind: 'examen', area: 'teoria', weight: 50, min: 4 },
+      { name: 'Proyecto', kind: 'entrega', area: 'practicas', weight: 50, min: 5 },
     ],
   },
 ];
+
+/** Crea la evaluación típica: un bloque de teoría y otro de prácticas */
+export function setupTheoryPractice(s, { wt = 70, wp = 30, mt = null, mp = null } = {}) {
+  const t = { id: uid(), name: 'Teoría', kind: 'examen', area: 'teoria', weight: wt, min: mt };
+  const p = { id: uid(), name: 'Prácticas', kind: 'practica', area: 'practicas', weight: wp, min: mp };
+  s.comps = [t, p].filter((c) => +c.weight > 0);
+  if (+wt > 0) state.items.push(newItem({ subjectId: s.id, compId: t.id, kind: 'examen', title: 'Examen de teoría' }));
+}
 
 export function applyPreset(s, preset) {
   s.comps = preset.comps.map((c) => ({ id: uid(), ...c }));
@@ -503,7 +553,7 @@ export function applyPreset(s, preset) {
       state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Primer parcial', call: 'Parcial' }));
       state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Segundo parcial', call: 'Parcial' }));
     } else if (c.kind === 'examen' || c.kind === 'entrega') {
-      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: c.kind, title: c.name }));
+      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: c.kind, title: c.name === 'Teoría' ? 'Examen de teoría' : c.name }));
     }
   }
 }
@@ -528,12 +578,12 @@ export function loadDemo() {
   };
 
   mk(
-    { name: 'Estructuras de Datos', short: 'ED', color: PALETTE[0], credits: 6, year: 2, room: 'A3.10',
+    { name: 'Estructuras de Datos', short: 'ED', color: PALETTE[0], credits: 6, year: 2, room: 'A3.10', groupT: 'T1', groupP: 'L3', roomP: 'L2.05',
       teachers: [{ id: uid(), name: 'Prof. García', email: 'garcia@ejemplo.es', office: 'F1.45', hours: 'Martes 11:00-13:00' }],
       topics: ['Listas y pilas', 'Árboles', 'Grafos', 'Tablas hash'].map((n, i) => ({ id: uid(), name: n, done: i < 2 })) },
     [
-      { name: 'Parciales', kind: 'examen', weight: 60, min: 4 },
-      { name: 'Prácticas', kind: 'practica', weight: 40 },
+      { name: 'Parciales de teoría', kind: 'examen', area: 'teoria', weight: 60, min: 4 },
+      { name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 40, min: 4 },
     ],
     [
       { c: 0, kind: 'examen', title: 'Primer parcial', date: d(-20), time: '10:00', place: 'Aula A1.12', grade: 6.4, call: 'Parcial' },
@@ -549,11 +599,11 @@ export function loadDemo() {
   );
 
   mk(
-    { name: 'Bases de Datos', short: 'BD', color: PALETTE[1], credits: 6, year: 2, room: 'A2.14' },
+    { name: 'Bases de Datos', short: 'BD', color: PALETTE[1], credits: 6, year: 2, room: 'A2.14', groupT: 'T1', groupP: 'L1', roomP: 'L1.03' },
     [
-      { name: 'Examen de teoría', kind: 'examen', weight: 60, min: 4.5 },
-      { name: 'Proyecto', kind: 'entrega', weight: 30, min: 5 },
-      { name: 'Participación', kind: 'otro', weight: 10 },
+      { name: 'Teoría', kind: 'examen', area: 'teoria', weight: 60, min: 4.5 },
+      { name: 'Proyecto de prácticas', kind: 'entrega', area: 'practicas', weight: 30, min: 5 },
+      { name: 'Participación', kind: 'otro', area: 'otro', weight: 10 },
     ],
     [
       { c: 0, kind: 'examen', title: 'Examen final', date: d(40), time: '16:00', place: 'Aula B2.01', call: 'Primera convocatoria' },
@@ -567,15 +617,15 @@ export function loadDemo() {
   );
 
   mk(
-    { name: 'Redes de Computadores', short: 'RC', color: PALETTE[2], credits: 6, year: 2, room: 'A1.08' },
+    { name: 'Redes de Computadores', short: 'RC', color: PALETTE[2], credits: 6, year: 2, room: 'A1.08', groupT: 'T2', groupP: 'L4', roomP: 'L0.02' },
     [
-      { name: 'Examen final', kind: 'examen', weight: 70, min: 4 },
-      { name: 'Prácticas', kind: 'practica', weight: 30 },
+      { name: 'Teoría', kind: 'examen', area: 'teoria', weight: 70, min: 4 },
+      { name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 30 },
     ],
     [
       { c: 1, kind: 'practica', title: 'Práctica Wireshark', date: d(-6), grade: 7, done: true },
       { c: 1, kind: 'practica', title: 'Práctica de subredes', date: d(8), time: '14:00' },
-      { c: 0, kind: 'examen', title: 'Examen final', date: d(45), time: '09:00', call: 'Primera convocatoria' },
+      { c: 0, kind: 'examen', title: 'Examen de teoría', date: d(45), time: '09:00', call: 'Primera convocatoria' },
     ],
     [
       { day: 1, start: '12:30', end: '14:00', type: 'Teoría', room: 'A1.08' },
