@@ -795,3 +795,24 @@ body.no-tabs #tabbar { display: none; }
 .tp-grid.flat { background: none; padding: 10px 0 0; }
 .tp-grid.flat b { color: var(--accent); }
 .only-annual .check { padding-top: 0; }
+
+/* ---------- Apartados avanzados (mejores notas, por cuatri, opcionales) ---------- */
+
+.opt {
+  font-style: normal; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 6px; padding: 2px 6px; margin-left: 6px; vertical-align: 2px;
+}
+.comp-title small { flex-wrap: wrap; line-height: 1.4; }
+.bonus { font-size: 13.5px; color: var(--muted); margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: var(--surface-2); }
+.bonus.on { color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); font-weight: 600; }
+.comp-period {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-top: 12px; padding-bottom: 4px; font-size: 12.5px; font-weight: 800; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.comp-period b { font-size: 15px; color: var(--text); letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; }
+.comp-period b small { font-size: 12px; color: var(--muted); font-weight: 600; }
+.comp-period + .comp-items { margin-top: 0; }
+.pad { padding: 8px 0; }
+.adv > * + * { margin-top: 10px; }

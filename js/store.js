@@ -237,6 +237,7 @@ export function newItem(data = {}) {
     grade: null,
     max: 10,
     min: null,
+    period: '',
     weight: 1,
     done: false,
     notes: '',
@@ -300,6 +301,34 @@ export const periodOf = (c) => (c.period === 'C2' ? 'C2' : 'C1');
 
 const numOrNull = (v) => (v === '' || v == null || Number.isNaN(+v) ? null : +v);
 
+/** ¿Es un apartado opcional que solo cuenta si mejora la nota? */
+export const isOptional = (c) => !!c.optional && !!c.replaces;
+
+/** Cuatrimestre de un evaluable: el elegido o, si no, el de su fecha */
+export function itemPeriod(i) {
+  if (i.period === 'C1' || i.period === 'C2') return i.period;
+  if (!i.date) return 'C1';
+  const m = toDate(i.date).getMonth();
+  return m >= 7 || m === 0 ? 'C1' : 'C2';
+}
+
+/** Media de unos evaluables: normal (con pesos) o de las mejores notas */
+function aggregate(its, c, sim) {
+  if (!its.length) return { avg: null, share: 0 };
+  const iw = its.reduce((a, i) => a + wt(i), 0);
+  const graded = its.map((i) => ({ i, g: grade10(i, sim) })).filter((x) => x.g != null);
+  const share = graded.reduce((a, x) => a + wt(x.i), 0) / iw;
+  if (!graded.length) return { avg: null, share: 0 };
+  let use = graded;
+  if (c.agg === 'best') {
+    const pct = Math.min(100, Math.max(1, +c.bestPct || 80)) / 100;
+    const k = Math.max(1, Math.round(graded.length * pct));
+    use = [...graded].sort((a, b) => b.g - a.g).slice(0, k);
+  }
+  const w = use.reduce((a, x) => a + wt(x.i), 0);
+  return { avg: use.reduce((a, x) => a + x.g * wt(x.i), 0) / w, share };
+}
+
 /** Agrupa apartados y calcula su media, lo evaluado y la mínima */
 function summarize(parts, weight = null, min = null) {
   let num = 0;
@@ -341,10 +370,13 @@ export function calc(s, sim = null) {
   const items = itemsOf(s.id);
   const split = isSplit(s);
 
+  // Los apartados opcionales (mejoran la nota) no suman peso propio
+  const regular = comps.filter((c) => !isOptional(c));
+
   // Peso real de cada apartado en la nota final (0-1)
-  const totalW = comps.reduce((a, c) => a + (+c.weight || 0), 0);
+  const totalW = regular.reduce((a, c) => a + (+c.weight || 0), 0);
   const per = { C1: 0, C2: 0 };
-  for (const c of comps) per[periodOf(c)] += +c.weight || 0;
+  for (const c of regular) per[periodOf(c)] += +c.weight || 0;
   const pw = split ? { C1: +(s.periods?.C1?.weight ?? 50), C2: +(s.periods?.C2?.weight ?? 50) } : null;
   const pwTotal = split ? pw.C1 + pw.C2 || 1 : 1;
   const weightOf = (c) => {
@@ -356,14 +388,12 @@ export function calc(s, sim = null) {
   let points = 0; // puntos conseguidos (sobre 10)
   let doneW = 0; // peso ya evaluado (0-1)
   let simulated = false;
-  const itemFails = []; // pruebas por debajo de su nota mínima
+  const itemFails = []; // pruebas (o cuatrimestres de un apartado) por debajo de su mínima
   const itemRisk = []; // pruebas pendientes con mínimo
+  const periodRisk = []; // cuatrimestres de un apartado que van por debajo de su mínima
 
   const parts = comps.map((c) => {
     const its = items.filter((i) => i.compId === c.id);
-    const iw = its.reduce((a, i) => a + wt(i), 0);
-    let share = 0;
-    let sum = 0;
     for (const i of its) {
       const g = grade10(i, sim);
       const min = numOrNull(i.min);
@@ -376,26 +406,67 @@ export function calc(s, sim = null) {
         const raw = sim && sim[i.id] != null ? +sim[i.id] : +i.grade;
         if (raw < min) itemFails.push({ item: i, grade: raw, min });
       }
-      share += wt(i) / iw;
-      sum += (g * wt(i)) / iw;
     }
-    const w = weightOf(c);
-    const avg = share > 0 ? sum / share : null;
-    points += sum * w;
-    doneW += share * w;
+
+    // Nota del apartado: media normal o de las mejores, y por cuatrimestre si toca
+    let avg;
+    let share;
+    let byPeriod = null;
+    if (c.byPeriod && !split) {
+      const pmin = numOrNull(c.periodMin);
+      byPeriod = ['C1', 'C2'].map((k) => {
+        const g = aggregate(its.filter((i) => itemPeriod(i) === k), c, sim);
+        const complete = g.share > 0.9999;
+        if (pmin != null && g.avg != null && g.avg < pmin) {
+          const entry = { item: { title: `${c.name} (${PERIOD_SHORT[k]})` }, grade: g.avg, min: pmin };
+          (complete ? itemFails : periodRisk).push(entry);
+        }
+        return { period: k, ...g, complete, min: pmin };
+      });
+      const got = byPeriod.filter((x) => x.avg != null);
+      const den = got.reduce((a, x) => a + x.share, 0);
+      avg = den ? got.reduce((a, x) => a + x.avg * x.share, 0) / den : null;
+      share = byPeriod.reduce((a, x) => a + x.share, 0) / 2;
+    } else {
+      ({ avg, share } = aggregate(its, c, sim));
+    }
+
+    const optional = isOptional(c);
+    const w = optional ? 0 : weightOf(c);
+    if (avg != null) {
+      points += avg * share * w;
+      doneW += share * w;
+    }
     const min = numOrNull(c.min);
+    const complete = byPeriod ? byPeriod.every((x) => x.complete) : its.length > 0 && share > 0.9999;
     return {
       comp: c,
       items: its,
       weight: w,
       avg,
       share,
-      complete: its.length > 0 && share > 0.9999,
+      byPeriod,
+      optional,
+      complete,
       min,
       belowMin: min != null && avg != null && avg < min,
-      failsMin: min != null && avg != null && share > 0.9999 && avg < min,
+      failsMin: min != null && avg != null && complete && avg < min,
     };
   });
+
+  // Apartados opcionales: sustituyen parte de otro solo si te suben la nota
+  let bonus = 0;
+  for (const p of parts) {
+    if (!p.optional || p.avg == null) continue;
+    const target = parts.find((x) => x.comp.id === p.comp.replaces);
+    if (!target || target.avg == null) continue;
+    const share = Math.min(p.share, target.share);
+    const wO = totalW ? (+p.comp.weight || 0) / totalW : 0;
+    p.bonus = Math.max(0, p.avg - target.avg) * wO * share;
+    p.target = target;
+    bonus += p.bonus;
+  }
+  points += bonus;
 
   // Nota de cada cuatrimestre (anuales)
   const periods = split
@@ -411,6 +482,7 @@ export function calc(s, sim = null) {
   const failsMin = parts.some((p) => p.failsMin) || periods.some((p) => p.failsMin);
   const atRiskMin = [
     ...parts.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: p.comp.name, avg: p.avg, min: p.min })),
+    ...periodRisk.map((r) => ({ name: r.item.title, avg: r.grade, min: r.min })),
     ...periods.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: PERIODS[p.period], avg: p.avg, min: p.min })),
   ];
 
@@ -437,9 +509,12 @@ export function calc(s, sim = null) {
 
   // Mínimos que quedan por cumplir
   const minsPending = [
-    ...parts.filter((p) => p.min != null && !p.complete).map((p) => ({ name: p.comp.name, min: p.min, avg: p.avg })),
+    ...parts.filter((p) => p.min != null && !p.complete && !p.optional).map((p) => ({ name: p.comp.name, min: p.min, avg: p.avg })),
     ...periods.filter((p) => p.min != null && !p.complete).map((p) => ({ name: PERIODS[p.period], min: p.min, avg: p.avg })),
     ...itemRisk.map((r) => ({ name: r.item.title, min: r.min, avg: null, scale: +r.item.max || 10 })),
+    ...parts.flatMap((p) => (p.byPeriod || [])
+      .filter((g) => g.min != null && !g.complete && g.avg == null)
+      .map((g) => ({ name: `${p.comp.name} del ${PERIODS[g.period]}`, min: g.min, avg: null }))),
   ];
 
   return {
@@ -449,6 +524,7 @@ export function calc(s, sim = null) {
     totalW,
     weightIssues: weightIssues(s, comps, per, pw),
     points,
+    bonus,
     doneW,
     pendingW,
     current,
@@ -619,6 +695,24 @@ export const PRESETS = [
     ],
   },
   {
+    name: 'Anual: parciales, controles y cuestionarios',
+    annual: true,
+    desc: 'Teoría 60 % (un parcial por cuatri, mín. 3 cada uno y 4 de media) · Prácticas 40 % (controles en cada cuatri, mín. 3 por cuatri y 4 de media) · Cuestionarios opcionales: media del 80 % mejores, sustituyen el 20 % de teoría si te suben',
+    comps: [
+      { key: 'tp', name: 'Teoría', kind: 'examen', area: 'teoria', weight: 60, min: 4, byPeriod: true, periodMin: 3 },
+      { key: 'pi', name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 40, min: 4, byPeriod: true, periodMin: 3 },
+      { key: 'ct', name: 'Cuestionarios de teoría', kind: 'otro', area: 'teoria', weight: 20, min: null, optional: true, replacesKey: 'tp', agg: 'best', bestPct: 80, byPeriod: true },
+    ],
+    items: [
+      ['tp', 'examen', 'Parcial de teoría (1.er cuatri)', 'C1'],
+      ['tp', 'examen', 'Parcial de teoría (2.º cuatri)', 'C2'],
+      ['pi', 'practica', 'Control de prácticas 1', 'C1'],
+      ['pi', 'practica', 'Control de prácticas 2', 'C1'],
+      ['pi', 'practica', 'Control de prácticas 3', 'C2'],
+      ['pi', 'practica', 'Control de prácticas 4', 'C2'],
+    ],
+  },
+  {
     name: 'Proyecto',
     comps: [
       { name: 'Examen', kind: 'examen', area: 'teoria', weight: 50, min: 4 },
@@ -639,14 +733,38 @@ export function setupTheoryPractice(s, { wt = 70, wp = 30, mt = null, mp = null 
 }
 
 export function applyPreset(s, preset) {
-  s.comps = preset.comps.map((c) => ({ id: uid(), ...c }));
+  // Quita los evaluables vacíos que se crearon con la evaluación anterior
+  const old = new Set((s.comps || []).map((c) => c.id));
+  state.items = state.items.filter((i) => !(i.subjectId === s.id && old.has(i.compId) && i.grade == null && !i.date && !i.done && !i.notes));
+  state.items.forEach((i) => { if (i.subjectId === s.id && old.has(i.compId)) i.compId = ''; });
+
+  if (preset.annual) {
+    // Evaluación de todo el curso (no una nota por cuatrimestre)
+    s.term = 'A';
+    s.split = false;
+    const ids = {};
+    s.comps = preset.comps.map(({ key, replacesKey, ...c }) => {
+      const comp = { id: uid(), ...c };
+      ids[key] = comp;
+      return comp;
+    });
+    preset.comps.forEach((c) => { if (c.replacesKey) ids[c.key].replaces = ids[c.replacesKey].id; });
+    for (const [key, kind, title, period] of preset.items) {
+      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title, period, call: kind === 'examen' ? 'Parcial' : '' }));
+    }
+    return;
+  }
+
+  const make = (period) => preset.comps.map((c) => ({ id: uid(), ...c, period }));
+  s.comps = isSplit(s) ? [...make('C1'), ...make('C2')] : make('');
   // Crea los evaluables básicos de cada apartado
   for (const c of s.comps) {
+    const tag = c.period ? ` (${PERIOD_SHORT[c.period]})` : '';
     if (c.name === 'Parciales') {
-      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Primer parcial', call: 'Parcial' }));
-      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Segundo parcial', call: 'Parcial' }));
+      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Primer parcial' + tag, call: 'Parcial' }));
+      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: 'examen', title: 'Segundo parcial' + tag, call: 'Parcial' }));
     } else if (c.kind === 'examen' || c.kind === 'entrega') {
-      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: c.kind, title: c.name === 'Teoría' ? 'Examen de teoría' : c.name }));
+      state.items.push(newItem({ subjectId: s.id, compId: c.id, kind: c.kind, title: (c.name === 'Teoría' ? 'Examen de teoría' : c.name) + tag }));
     }
   }
 }

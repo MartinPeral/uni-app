@@ -4,7 +4,7 @@
 
 import * as S from './store.js';
 
-const APP_VERSION = '1.3';
+const APP_VERSION = '1.4';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -218,7 +218,7 @@ function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
 /** Barra apilada con los apartados de evaluación */
 function compBar(c, s) {
   if (!c.parts.length) return '';
-  return `<div class="cbar" style="--c:${subjColor(s)}">${c.parts.map((p) => `
+  return `<div class="cbar" style="--c:${subjColor(s)}">${c.parts.filter((p) => !p.optional).map((p) => `
     <span style="flex:${Math.max(p.weight, 0.001)}" title="${esc(p.comp.name)}">
       <i style="width:${p.avg == null ? 0 : (p.avg / 10) * p.share * 100}%"></i>
     </span>`).join('')}</div>`;
@@ -586,6 +586,7 @@ function heroHTML(s) {
         <div class="hero-nums">
           <span><b>${fmt(c.points)}</b> puntos de 10</span>
           <span><b>${pct(c.doneW)}</b> evaluado</span>
+          ${c.bonus > 0 ? `<span class="text-good"><b>+${fmt(c.bonus)}</b> por opcionales</span>` : ''}
         </div>`}
       </div>
     </div>
@@ -637,7 +638,7 @@ function evalTab(s) {
         <div class="presets">${S.PRESETS.map((p, i) => `
           <button class="preset" data-action="apply-preset" data-id="${s.id}" data-i="${i}">
             <strong>${p.name}</strong>
-            <small>${p.comps.map((x) => `${x.name} ${x.weight} %`).join(' · ')}</small>
+            <small>${p.desc || p.comps.map((x) => `${x.name} ${x.weight} %`).join(' · ')}</small>
           </button>`).join('')}
         </div>
         <button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Crear desde cero</button>
@@ -682,12 +683,13 @@ function evalTab(s) {
       <div class="card comp">
         <div class="comp-head">
           <button class="comp-title" data-action="edit-comp" data-id="${s.id}" data-c="${p.comp.id}">
-            <strong>${esc(p.comp.name)}</strong>
-            <small>${fmt(p.comp.weight)} %${p.min != null ? ` · mínimo ${fmt(p.min)}` : ''} · ${I.edit}</small>
+            <strong>${esc(p.comp.name)}${p.optional ? ' <em class="opt">Opcional</em>' : ''}</strong>
+            <small>${compRules(p, c)} ${I.edit}</small>
           </button>
           <span class="comp-avg" data-comp-avg="${p.comp.id}">${gradeBadge(p.avg)}</span>
         </div>
-        ${p.items.length ? `<div class="comp-items">${p.items.sort(S.byDate).map((it) => gradeRow(it, sim, p.items.length)).join('')}</div>` : '<p class="muted small">Sin evaluables. Añade el examen o las prácticas de este apartado.</p>'}
+        ${p.optional && p.target ? `<p class="bonus ${p.bonus > 0 ? 'on' : ''}" data-comp-bonus="${p.comp.id}">${bonusText(p)}</p>` : ''}
+        ${p.items.length ? compItems(p, sim) : '<p class="muted small">Sin evaluables. Añade el examen o las prácticas de este apartado.</p>'}
         <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${p.comp.id}" data-k="${p.comp.kind || 'examen'}">${I.plusSm} Añadir ${addLabel(p.comp)}</button>
       </div>`).join('')}
     </div>`).join('')}
@@ -695,6 +697,7 @@ function evalTab(s) {
     `).join('')}
 
     ${c.split ? '' : `<button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Añadir apartado de evaluación</button>`}
+    <button class="btn text block" data-action="presets" data-id="${s.id}">Cambiar a otra plantilla de evaluación</button>
 
     ${loose.length ? `
       <h2 class="section-title">No cuentan para la nota</h2>
@@ -709,6 +712,42 @@ function evalTab(s) {
       </div>` : `
       <button class="btn block ${c.pendingW < 1e-6 && c.parts.length ? 'primary' : ''}" data-action="final" data-id="${s.id}">Poner nota del acta</button>
       <p class="hint">Cuando tengas la nota oficial, ponla aquí. La asignatura pasa a tu expediente.</p>`}`;
+}
+
+/** Reglas de un apartado en una línea: peso, mínimos, cómo se calcula */
+function compRules(p, c) {
+  const x = p.comp;
+  const target = x.replaces && c.parts.find((q) => q.comp.id === x.replaces);
+  const bits = [
+    p.optional ? `puede sustituir ${fmt(x.weight)} % de ${esc(target?.comp.name || '—')}` : `${fmt(x.weight)} %`,
+    x.agg === 'best' ? `media del ${fmt(x.bestPct || 80)} % mejores` : '',
+    p.byPeriod ? 'media de los dos cuatris' : '',
+    p.byPeriod && x.periodMin != null && x.periodMin !== '' ? `mín. ${fmt(x.periodMin)} en cada cuatri` : '',
+    p.min != null ? `mín. ${fmt(p.min)}${p.byPeriod ? ' de media' : ''}` : '',
+  ].filter(Boolean);
+  return bits.join(' · ') + ' ·';
+}
+
+function bonusText(p) {
+  if (p.bonus > 0) return `Te suma ${fmt(p.bonus)} puntos: sacas más que en ${esc(p.target.comp.name)}.`;
+  if (p.avg != null && p.target.avg != null) return `Ahora no te sube la nota (vas mejor en ${esc(p.target.comp.name)}), así que no cuenta.`;
+  return `Solo cuenta si te sube la nota de ${esc(p.target.comp.name)}.`;
+}
+
+/** Evaluables de un apartado, separados por cuatrimestre si se evalúa así */
+function compItems(p, sim) {
+  const rows = (list) => list.sort(S.byDate).map((it) => gradeRow(it, sim, list.length)).join('');
+  if (!p.byPeriod) return `<div class="comp-items">${rows(p.items)}</div>`;
+  return p.byPeriod.map((g) => {
+    const list = p.items.filter((i) => S.itemPeriod(i) === g.period);
+    const low = g.min != null && g.avg != null && g.avg < g.min;
+    return `
+      <div class="comp-period">
+        <span>${S.PERIODS[g.period]}</span>
+        <b class="${low ? 'text-bad' : ''}" data-cp-avg="${p.comp.id}-${g.period}">${fmt(g.avg)}${g.min != null ? `<small> / mín. ${fmt(g.min)}</small>` : ''}</b>
+      </div>
+      <div class="comp-items">${list.length ? rows(list) : '<p class="muted small pad">Nada todavía</p>'}</div>`;
+  }).join('');
 }
 
 /** Texto del botón para añadir un evaluable a un apartado */
@@ -865,6 +904,15 @@ function refreshLive(s) {
   for (const p of c.parts) {
     const el = app.querySelector(`[data-comp-avg="${p.comp.id}"]`);
     if (el) el.innerHTML = gradeBadge(p.avg);
+  }
+  for (const p of c.parts) {
+    const b = app.querySelector(`[data-comp-bonus="${p.comp.id}"]`);
+    if (b && p.target) { b.textContent = bonusText(p); b.classList.toggle('on', p.bonus > 0); }
+    for (const g of p.byPeriod || []) {
+      const el = app.querySelector(`[data-cp-avg="${p.comp.id}-${g.period}"]`);
+      if (el) el.innerHTML = `${fmt(g.avg)}${g.min != null ? `<small> / mín. ${fmt(g.min)}</small>` : ''}`;
+      if (el) el.classList.toggle('text-bad', g.min != null && g.avg != null && g.avg < g.min);
+    }
   }
   for (const p of c.periods) {
     const el = app.querySelector(`[data-period-avg="${p.period}"]`);
@@ -1421,6 +1469,9 @@ function openItemSheet(id, preset = {}) {
       ${field(it.kind === 'examen' ? 'Hora' : 'Hora límite', `<input class="input" type="time" name="time" value="${esc(it.time)}">`)}
     </div>
     ${field('Lugar', text('place', it.place, 'placeholder="Aula, laboratorio, online…"'))}
+    <div class="only-annual-item" ${annualNoSplit(it.subjectId) ? '' : 'hidden'}>
+      <div class="field"><span>Cuatrimestre</span>${segPick('period', [['', 'Por la fecha'], ['C1', '1.er cuatri'], ['C2', '2.º cuatri']], it.period || '')}</div>
+    </div>
     <div class="only-exam" ${it.kind === 'examen' ? '' : 'hidden'}>${field('Convocatoria', select('call', [['', '—'], ...S.CALLS.map((c) => [c, c])], it.call))}</div>
 
     <div class="sub-card">
@@ -1445,6 +1496,12 @@ function openItemSheet(id, preset = {}) {
     </div>` : '');
 }
 
+/** Anual evaluada en todo el curso: sus pruebas se reparten por cuatrimestre */
+const annualNoSplit = (id) => {
+  const s = S.subject(id);
+  return !!s && s.term === 'A' && !s.split;
+};
+
 /** Apartado que mejor encaja con el tipo: el del mismo tipo o el del mismo bloque */
 function defaultComp(s, kind) {
   if (!s) return '';
@@ -1463,7 +1520,7 @@ function openCompSheet(subjectId, compId, period = 'C1') {
   const split = S.isSplit(s);
   const c = compId ? s.comps.find((x) => x.id === compId) : { name: '', kind: 'examen', area: 'teoria', weight: '', min: null, period };
   const same = (x) => !split || S.periodOf(x) === S.periodOf(c);
-  const used = s.comps.filter((x) => x.id !== compId && same(x)).reduce((a, x) => a + (+x.weight || 0), 0);
+  const used = s.comps.filter((x) => x.id !== compId && same(x) && !S.isOptional(x)).reduce((a, x) => a + (+x.weight || 0), 0);
   if (!compId) c.weight = Math.max(0, 100 - used);
   sheetCtx = { subjectId, compId };
   const kinds = Object.entries(S.KINDS).map(([k, v]) => [k, v.label]);
@@ -1475,6 +1532,19 @@ function openCompSheet(subjectId, compId, period = 'C1') {
     <div class="two">
       ${field(split ? 'Peso en el cuatri (%)' : 'Peso en la nota (%)', text('weight', c.weight === '' ? '' : fmt(c.weight), 'inputmode="decimal"'))}
       ${field('Nota mínima', text('min', c.min == null ? '' : fmt(c.min), 'inputmode="decimal" placeholder="Sin mínimo"'))}
+    </div>
+    <div class="sub-card adv">
+      <div class="field"><span>Cómo se calcula su nota</span>${segPick('agg', [['media', 'Media de todas'], ['best', 'Media de las mejores']], c.agg || 'media')}</div>
+      <div class="only-best" ${c.agg === 'best' ? '' : 'hidden'}>${field('Porcentaje de las mejores que cuentan', text('bestPct', fmt(c.bestPct || 80), 'inputmode="decimal"'))}
+        <p class="hint">Ej.: 80 % de 5 cuestionarios = cuentan los 4 mejores.</p></div>
+      ${s.term === 'A' && !split ? `
+      <label class="check"><input type="checkbox" name="byPeriod" ${c.byPeriod ? 'checked' : ''}><span>Nota en cada cuatrimestre y luego media de los dos</span></label>
+      ${field('Mínimo en cada cuatrimestre', text('periodMin', c.periodMin == null || c.periodMin === '' ? '' : fmt(c.periodMin), 'inputmode="decimal" placeholder="Sin mínimo"'))}` : ''}
+      <label class="check"><input type="checkbox" name="optional" ${c.optional ? 'checked' : ''}><span>Opcional: solo cuenta si te sube la nota</span></label>
+      <div class="only-opt" ${c.optional ? '' : 'hidden'}>
+        ${field('Sustituye parte de', select('replaces', s.comps.filter((x) => x.id !== compId && !x.optional).map((x) => [x.id, x.name]), c.replaces))}
+        <p class="hint">Ej.: cuestionarios con peso 20 que sustituyen parte de Teoría (60): la nota es la mejor entre 0,6·Teoría y 0,4·Teoría + 0,2·Cuestionarios.</p>
+      </div>
     </div>
     <p class="hint">El resto de apartados${split ? ' de ese cuatrimestre' : ''} suman ${fmt(used)} %. Si la guía exige sacar al menos un 4 en este apartado para hacer media, pon 4 en nota mínima.</p>`,
   'save-comp',
@@ -1595,6 +1665,9 @@ const actions = {
     const name = box.dataset.pick;
     form.elements[name].value = el.dataset.value;
     box.querySelectorAll('[data-value]').forEach((b) => b.classList.toggle('on', b === el));
+    if (name === 'agg' && form.dataset.save === 'save-comp') {
+      form.querySelector('.only-best').hidden = el.dataset.value !== 'best';
+    }
     if (name === 'term' && form.dataset.save === 'save-subject') {
       form.querySelector('.only-annual').hidden = el.dataset.value !== 'A';
     }
@@ -1690,8 +1763,29 @@ const actions = {
   },
 
   // --- Evaluación ---
-  'apply-preset': (el) => {
+  presets: (el) => {
     const s = subjectOf(el);
+    openOverlay(`
+      <div class="sheet auto" role="dialog" aria-modal="true" aria-label="Plantillas">
+        ${sheetHead('Plantillas de evaluación')}
+        <div class="sheet-body">
+          <p class="muted small">Se sustituyen los apartados actuales. Las notas que ya tengas se quedan, pero sin apartado: tendrás que asignarlas al nuevo.</p>
+          <div class="presets">${S.PRESETS.map((p, i) => `
+            <button class="preset" data-action="apply-preset" data-id="${s.id}" data-i="${i}" data-confirm="1">
+              <strong>${p.name}</strong>
+              <small>${p.desc || p.comps.map((x) => `${x.name} ${x.weight} %`).join(' · ')}</small>
+            </button>`).join('')}
+          </div>
+        </div>
+      </div>`, 'bottom');
+  },
+  'apply-preset': async (el) => {
+    const s = subjectOf(el);
+    if (el.dataset.confirm) {
+      const i = +el.dataset.i;
+      closeOverlay();
+      if (!(await ask(`¿Cambiar la evaluación de ${s.name} a "${S.PRESETS[i].name}"?`, { ok: 'Cambiar' }))) return;
+    }
     S.applyPreset(s, S.PRESETS[+el.dataset.i]);
     S.save();
     toast('Ajusta los porcentajes si tu guía es distinta');
@@ -1706,7 +1800,14 @@ const actions = {
     const w = parseNum(d.weight);
     if (w == null || w < 0 || w > 100) return toast('El peso va de 0 a 100');
     const min = parseNum(d.min);
-    const data = { name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
+    const data = {
+      agg: d.agg,
+      bestPct: parseNum(d.bestPct) || 80,
+      byPeriod: !!d.byPeriod,
+      periodMin: parseNum(d.periodMin),
+      optional: !!d.optional && !!d.replaces,
+      replaces: d.optional ? d.replaces : '',
+      name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
     if (sheetCtx.compId) Object.assign(s.comps.find((c) => c.id === sheetCtx.compId), data);
     else s.comps.push({ id: S.uid(), ...data });
     S.save();
@@ -1776,6 +1877,7 @@ const actions = {
       grade: g,
       max,
       min: parseNum(d.min),
+      period: d.period || '',
       weight: parseNum(d.weight) || 1,
       done: !!d.done || (g != null && d.kind !== 'examen'),
       notes: d.notes.trim(),
@@ -2015,6 +2117,11 @@ document.addEventListener('change', async (e) => {
   const f = t.dataset.field;
   const st = S.state.settings;
 
+  if (t.name === 'optional' && t.closest('#overlay form')) {
+    t.closest('form').querySelector('.only-opt').hidden = !t.checked;
+    return;
+  }
+
   // Al cambiar la asignatura en el formulario, actualizar sus apartados
   if (t.name === 'subjectId' && t.closest('#overlay form')) {
     const form = t.closest('form');
@@ -2022,6 +2129,7 @@ document.addEventListener('change', async (e) => {
     const opts = compOptions(t.value);
     const pickId = defaultComp(S.subject(t.value), kind);
     document.getElementById('comp-sel').innerHTML = select('compId', opts, pickId);
+    form.querySelector('.only-annual-item').hidden = !annualNoSplit(t.value);
     return;
   }
 
