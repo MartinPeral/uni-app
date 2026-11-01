@@ -1164,3 +1164,4 @@ button.area-tile { text-align: left; width: 100%; }
 .cuatri-tiles { margin-top: 10px; }
 .area-tile.sel { border-color: var(--accent); }
 .bonus.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); font-weight: 600; }
+.gbadge.pts small { font-size: 11px; font-weight: 700; opacity: .7; margin-left: 1px; }

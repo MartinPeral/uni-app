@@ -6,7 +6,7 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -245,6 +245,14 @@ const arc = (size, r, C, frac, color, stroke, opacity = '1') => `
 /** Número que se anima al entrar */
 const counted = (n, d = 2) => (n == null ? '—' : `<span data-count="${n}" data-dec="${d}">${fmt(n, d)}</span>`);
 
+/** Nota de un apartado: sobre 10 o, si va en puntos, "2,4/3" */
+function compBadge(p) {
+  if (!p.comp.points || p.avg == null) return gradeBadge(p.avg);
+  const of = (+p.comp.weight || 0) / 10;
+  const low = p.min != null && p.avg < p.min;
+  return `<span class="gbadge pts t-${low ? 'bad' : S.gradeTone(p.avg)}">${fmt(S.toPoints(p.comp, p.avg))}<small>/${fmt(of)}</small></span>`;
+}
+
 /** Anillo de progreso: puntos asegurados sobre 10 */
 function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
   const r = (size - stroke) / 2;
@@ -303,7 +311,9 @@ function statusInfo(s, c) {
       const pr = c.periods.find((p) => p.failsMin);
       const f = c.itemFails[0];
       const text = s.final ? S.gradeLabel(+s.final.grade)
-        : m ? `No llegas a la nota mínima en ${m.comp.name} (${fmt(m.avg)} de ${fmt(m.min)}).`
+        : m ? (m.comp.points
+          ? `No llegas al mínimo en ${m.comp.name}: tienes ${fmt(S.toPoints(m.comp, m.avg))} de ${fmt((+m.comp.weight || 0) / 10)} y necesitas ${fmt(m.comp.min)}.`
+          : `No llegas a la nota mínima en ${m.comp.name} (${fmt(m.avg)} de ${fmt(m.min)}).`)
           : pr ? `No llegas a la mínima del ${S.PERIODS[pr.period]} (${fmt(pr.avg)} de ${fmt(pr.min)}).`
             : f ? `En ${f.item.title} no llegas al mínimo (${fmt(f.grade)} de ${fmt(f.min)}).`
               : 'No llegas al aprobado con estas notas.';
@@ -728,11 +738,15 @@ function evalTab(s) {
 
   const warnings = [...c.weightIssues];
   const alerts = c.itemFails.map((f) => `${esc(f.item.title)}: sacaste ${fmt(f.grade)} y el mínimo es ${fmt(f.min)}.`);
-  for (const p of c.atRiskMin) warnings.push(`En ${esc(p.name)} llevas ${fmt(p.avg)} y la mínima es ${fmt(p.min)}.`);
+  for (const p of c.atRiskMin) warnings.push(`En ${esc(p.name)} llevas ${fmt(p.avg)}${p.of ? ` de ${fmt(p.of)}` : ''} y la mínima es ${fmt(p.min)}.`);
   if (!s.final) {
     for (const p of c.minsPending) {
-      const min10 = p.scale ? (p.min / p.scale) * 10 : p.min;
-      if (p.avg == null && (c.need == null || min10 > c.need)) warnings.push(`En ${esc(p.name)} necesitas al menos un ${fmt(p.min)}${c.need != null && c.need > 0 ? ' aunque la media te pida menos' : ''}.`);
+      const min10 = p.min10 ?? (p.scale ? (p.min / p.scale) * 10 : p.min);
+      if (p.avg == null && (c.need == null || min10 > c.need)) {
+        warnings.push(p.of
+          ? `En ${esc(p.name)} necesitas al menos ${fmt(p.min)} de ${fmt(p.of)} puntos.`
+          : `En ${esc(p.name)} necesitas al menos un ${fmt(p.min)}${c.need != null && c.need > 0 ? ' aunque la media te pida menos' : ''}.`);
+      }
     }
   }
 
@@ -769,7 +783,7 @@ function evalTab(s) {
             <strong>${esc(p.comp.name)}${p.optional ? ' <em class="opt">Opcional</em>' : ''}</strong>
             <small>${compRules(p, c)} ${I.edit}</small>
           </button>
-          <span class="comp-avg" data-comp-avg="${p.comp.id}">${gradeBadge(p.avg)}</span>
+          <span class="comp-avg" data-comp-avg="${p.comp.id}">${compBadge(p)}</span>
         </div>
         ${p.optional && p.target ? `<p class="bonus ${p.bonus > 0 ? 'on' : ''}" data-comp-bonus="${p.comp.id}">${bonusText(p)}</p>` : ''}
         ${p.req && p.min != null ? `<p class="bonus ${p.avg != null && p.avg >= p.min ? 'on' : p.failsMin ? 'bad' : ''}">${reqText(p)}</p>` : ''}
@@ -870,7 +884,7 @@ function compRules(p, c) {
     x.agg === 'max' ? 'vale el mejor intento' : '',
     p.byPeriod ? 'media de los dos cuatris' : '',
     p.byPeriod && x.periodMin != null && x.periodMin !== '' ? `mín. ${fmt(x.periodMin)} en cada cuatri` : '',
-    p.min != null ? `${x.req ? 'hay que sacar' : 'mín.'} ${fmt(p.min)}${p.byPeriod ? ' de media' : ''}` : '',
+    p.min != null ? (x.points ? `mín. ${fmt(x.min)} sobre ${fmt((+x.weight || 0) / 10)}` : `${x.req ? 'hay que sacar' : 'mín.'} ${fmt(p.min)}${p.byPeriod ? ' de media' : ''}`) : '',
   ].filter(Boolean);
   return bits.join(' · ') + ' ·';
 }
@@ -1057,7 +1071,7 @@ function refreshLive(s) {
   const c = S.calc(s, simOn ? sims[s.id] : null);
   for (const p of c.parts) {
     const el = app.querySelector(`[data-comp-avg="${p.comp.id}"]`);
-    if (el) el.innerHTML = gradeBadge(p.avg);
+    if (el) el.innerHTML = compBadge(p);
   }
   for (const p of c.parts) {
     const b = app.querySelector(`[data-comp-bonus="${p.comp.id}"]`);
@@ -2246,6 +2260,7 @@ function openCompSheet(subjectId, compId, period = 'C1') {
       ${s.term === 'A' && !split ? `
       <label class="check"><input type="checkbox" name="byPeriod" ${c.byPeriod ? 'checked' : ''}><span>Nota en cada cuatrimestre y luego media de los dos</span></label>
       ${field('Mínimo en cada cuatrimestre', text('periodMin', c.periodMin == null || c.periodMin === '' ? '' : fmt(c.periodMin), 'inputmode="decimal" placeholder="Sin mínimo"'))}` : ''}
+      <label class="check"><input type="checkbox" name="points" ${c.points ? 'checked' : ''}><span>Nota mínima en puntos (ej. 1 sobre 3 en un apartado del 30 %)</span></label>
       <label class="check"><input type="checkbox" name="req" ${c.req ? 'checked' : ''}><span>Requisito: no cuenta en la nota, solo hay que llegar al mínimo</span></label>
       <label class="check"><input type="checkbox" name="optional" ${c.optional ? 'checked' : ''}><span>Opcional: solo cuenta si te sube la nota</span></label>
       <div class="only-opt" ${c.optional ? '' : 'hidden'}>
@@ -2761,6 +2776,7 @@ const actions = {
     const min = parseNum(d.min);
     if (d.req && min == null) return toast('Pon la nota mínima del requisito');
     const data = {
+      points: !!d.points,
       req: !!d.req,
       agg: d.agg,
       bestPct: parseNum(d.bestPct) || 80,
@@ -2768,7 +2784,7 @@ const actions = {
       periodMin: parseNum(d.periodMin),
       optional: !!d.optional && !!d.replaces,
       replaces: d.optional ? d.replaces : '',
-      name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
+      name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(d.points ? (w || 0) / 10 : 10, Math.max(0, min)) };
     if (data.req) { data.weight = 0; data.optional = false; data.replaces = ''; }
     if (sheetCtx.compId) Object.assign(s.comps.find((c) => c.id === sheetCtx.compId), data);
     else s.comps.push({ id: S.uid(), ...data });

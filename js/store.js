@@ -320,6 +320,26 @@ export const periodOf = (c) => (c.period === 'C2' ? 'C2' : 'C1');
 
 const numOrNull = (v) => (v === '' || v == null || Number.isNaN(+v) ? null : +v);
 
+/**
+ * Mínimo de un apartado sobre 10. Si el apartado va en puntos
+ * (como "1 sobre 3" de un apartado del 30 %), se convierte.
+ */
+export function minOf(c) {
+  const m = numOrNull(c.min);
+  if (m == null) return null;
+  if (!c.points) return m;
+  const max = (+c.weight || 0) / 10;
+  return max ? Math.min(10, (m / max) * 10) : null;
+}
+
+/** Nota de un apartado en puntos (sobre su peso), para los que van así */
+export const toPoints = (c, avg10) => (avg10 == null ? null : (avg10 * (+c.weight || 0)) / 100);
+
+/** Para avisos: la nota y el mínimo en la escala del apartado */
+const scaled = (p) => (p.comp.points
+  ? { name: p.comp.name, avg: toPoints(p.comp, p.avg), min: numOrNull(p.comp.min), of: (+p.comp.weight || 0) / 10 }
+  : { name: p.comp.name, avg: p.avg, min: p.min });
+
 /** ¿Es un apartado opcional que solo cuenta si mejora la nota? */
 export const isOptional = (c) => !!c.optional && !!c.replaces;
 
@@ -359,7 +379,7 @@ function summarize(parts, weight = null, min = null) {
   let mins = null;
   for (const p of parts) {
     w += p.weight;
-    if (p.min != null && !p.comp.req) mins = mins == null ? p.min : Math.max(mins, p.min);
+    if (p.min != null && !p.comp.req && !p.comp.points) mins = mins == null ? p.min : Math.max(mins, p.min);
     if (p.avg != null) {
       num += p.avg * p.weight * p.share;
       den += p.weight * p.share;
@@ -459,7 +479,7 @@ export function calc(s, sim = null) {
       points += avg * share * w;
       doneW += share * w;
     }
-    const min = numOrNull(c.min);
+    const min = minOf(c);
     const complete = byPeriod ? byPeriod.every((x) => x.complete) : its.length > 0 && share > 0.9999;
     return {
       comp: c,
@@ -509,7 +529,7 @@ export function calc(s, sim = null) {
   const current = doneW > 0 ? points / doneW : null;
   const failsMin = parts.some((p) => p.failsMin) || periods.some((p) => p.failsMin);
   const atRiskMin = [
-    ...parts.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: p.comp.name, avg: p.avg, min: p.min })),
+    ...parts.filter((p) => p.belowMin && !p.failsMin).map(scaled),
     ...periodRisk.map((r) => ({ name: r.item.title, avg: r.grade, min: r.min })),
     ...periods.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: PERIODS[p.period], avg: p.avg, min: p.min })),
   ];
@@ -540,7 +560,7 @@ export function calc(s, sim = null) {
 
   // Mínimos que quedan por cumplir
   const minsPending = [
-    ...parts.filter((p) => p.min != null && !p.complete && !p.optional).map((p) => ({ name: p.comp.name, min: p.min, avg: p.avg })),
+    ...parts.filter((p) => p.min != null && !p.complete && !p.optional).map((p) => ({ ...scaled(p), min10: p.min })),
     ...periods.filter((p) => p.min != null && !p.complete).map((p) => ({ name: PERIODS[p.period], min: p.min, avg: p.avg })),
     ...itemRisk.map((r) => ({ name: r.item.title, min: r.min, avg: null, scale: +r.item.max || 10 })),
     ...parts.flatMap((p) => (p.byPeriod || [])
@@ -815,6 +835,20 @@ export const PRESETS = [
       ['test', 'examen', 'Test de teoría básica (2.º intento)'],
     ],
     notes: 'Asistencia obligatoria a laboratorio y seminarios, y presentación de trabajos. Se pueden recuperar hasta dos prácticas en sesiones posteriores. Para aprobar hay que sacar más de 5 en la media ponderada. Si apruebas, puedes presentarte a la 1.ª convocatoria para subir nota.',
+  },
+  {
+    name: 'Suma de apartados con mínimos (en puntos)',
+    desc: 'Como TG: trabajo 30 % (mín. 1 sobre 3), examen 30 % (mín. 1 sobre 3) y participación en problemas y laboratorio 40 % (mín. 1,5 sobre 4)',
+    comps: [
+      { key: 'tr', name: 'Trabajo de investigación', kind: 'entrega', area: 'otro', weight: 30, min: 1, points: true },
+      { key: 'ex', name: 'Examen', kind: 'examen', area: 'teoria', weight: 30, min: 1, points: true },
+      { key: 'pa', name: 'Participación en problemas y laboratorio', kind: 'practica', area: 'practicas', weight: 40, min: 1.5, points: true },
+    ],
+    items: [
+      ['tr', 'entrega', 'Trabajo de investigación (en grupo)'],
+      ['ex', 'examen', 'Examen de contenidos'],
+    ],
+    notes: 'Primera convocatoria por evaluación continua: la nota final es la suma de los tres apartados, siempre que se llegue al mínimo en cada uno. No hay examen final en primera convocatoria. En el resto de convocatorias: examen teórico-práctico de todo lo del cuatrimestre (teoría y prácticas).',
   },
   {
     name: 'Proyecto',
