@@ -3,12 +3,16 @@
 // =============================================================
 
 import * as S from './store.js';
+import * as St from './study.js';
+import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '1.4';
+const APP_VERSION = '2.0';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
 const toastEl = document.getElementById('toast');
+const snackEl = document.getElementById('snack');
+const miniEl = document.getElementById('minitimer');
 
 // ---------- Utilidades ----------
 
@@ -98,6 +102,18 @@ const I = {
   practica: svg('<path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 006 21h12a1.7 1.7 0 001.5-2.5L14 9V3"/><path d="M7 15h10"/>', 'width="18" height="18"'),
   entrega: svg('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>', 'width="18" height="18"'),
   otro: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/>', 'width="18" height="18"'),
+  undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/>', 'width="18" height="18"'),
+  play: svg('<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>', 'width="18" height="18"'),
+  playBig: svg('<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>', 'width="22" height="22"'),
+  pause: svg('<path d="M8 5v14M16 5v14"/>', 'width="20" height="20" stroke-width="3"'),
+  stop: svg('<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/>', 'width="18" height="18"'),
+  skip: svg('<path d="M5 5l9 7-9 7z" fill="currentColor" stroke="none"/><path d="M18 5v14"/>', 'width="18" height="18"'),
+  timer: svg('<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/>', 'width="18" height="18"'),
+  flame: svg('<path d="M12 22c4 0 7-2.7 7-6.8 0-4.4-3.6-6.8-4.6-10.7-.2-.8-1.2-1-1.6-.3C11.7 6.3 11 8.5 11 10c-1-.6-1.6-1.9-1.8-2.8-.1-.6-.9-.8-1.2-.3C6.5 9 5 11.5 5 15.2 5 19.3 8 22 12 22z" fill="currentColor" stroke="none"/>', 'width="16" height="16"'),
+  copy: svg('<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3"/>', 'width="18" height="18"'),
+  target: svg('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/>', 'width="18" height="18"'),
+  brain: svg('<path d="M9.5 3a3 3 0 00-3 3v.2A3 3 0 004 9a3 3 0 001 2.2A3.2 3.2 0 004 14a3 3 0 002.5 3A3 3 0 009.5 21 2.5 2.5 0 0012 18.5V5.5A2.5 2.5 0 009.5 3zM14.5 3a3 3 0 013 3v.2A3 3 0 0120 9a3 3 0 01-1 2.2 3.2 3.2 0 011 2.8 3 3 0 01-2.5 3 3 3 0 01-3 4 2.5 2.5 0 01-2.5-2.5"/>', 'width="40" height="40" stroke-width="1.6"'),
+  wand: svg('<path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/>', 'width="18" height="18"'),
 };
 
 // ---------- Navegación (rutas con #) ----------
@@ -117,7 +133,10 @@ const TAB_OF = {
   asignaturas: 'asignaturas', asignatura: 'asignaturas',
   agenda: 'agenda',
   notas: 'notas',
+  estudio: 'estudio',
 };
+const DEPTH = { asignatura: 1, ajustes: 1 };
+let enterTimer;
 const NO_TABS = ['ajustes'];
 
 let lastRouteKey = '';
@@ -131,6 +150,7 @@ function render() {
     agenda: viewAgenda,
     notas: viewRecord,
     ajustes: viewSettings,
+    estudio: viewStudy,
   };
   const view = views[r.name];
   if (!view) return go('#/inicio');
@@ -144,9 +164,36 @@ function render() {
     a.classList.toggle('active', a.dataset.tab === TAB_OF[r.name]));
 
   const key = r.name + '/' + (r.id || '');
-  if (key !== lastRouteKey) window.scrollTo(0, 0);
+  const changed = key !== lastRouteKey;
+  if (changed) {
+    window.scrollTo(0, 0);
+    // Animación de entrada: hacia dentro, hacia atrás o fundido
+    const prev = lastRouteKey.split('/')[0];
+    const a = DEPTH[r.name] || 0;
+    const b = DEPTH[prev] || 0;
+    const dir = !prev ? 'fade' : a > b ? 'fwd' : a < b ? 'back' : 'fade';
+    app.classList.remove('enter-fwd', 'enter-back', 'enter-fade');
+    void app.offsetWidth;
+    app.classList.add(`enter-${dir}`);
+    app.querySelectorAll('.stack > *, .glance > *, .exam-scroll > *, .stats > *, .plan > *').forEach((el, i) =>
+      el.style.setProperty('--i', Math.min(i % 12, 10)));
+    clearTimeout(enterTimer);
+    enterTimer = setTimeout(() => app.classList.remove('enter-fwd', 'enter-back', 'enter-fade'), 800);
+    countUp(app);
+  }
   lastRouteKey = key;
   afterRender(r);
+  tickStudy();
+}
+
+/** Redibuja con un fundido suave del contenido de la pestaña */
+function renderTab() {
+  render();
+  const body = app.querySelector('.tab-body');
+  if (!body) return;
+  body.classList.remove('tab-in');
+  void body.offsetWidth;
+  body.classList.add('tab-in');
 }
 
 window.addEventListener('hashchange', () => { simOn = false; render(); });
@@ -189,6 +236,15 @@ const gradeBadge = (g, { honors = false, size = '' } = {}) =>
     ? `<span class="gbadge none ${size}">—</span>`
     : `<span class="gbadge t-${S.gradeTone(g)} ${size}">${fmt(g)}${honors ? ` ${I.star}` : ''}</span>`;
 
+/** Arco de un anillo (se anima al entrar en la pantalla) */
+const arc = (size, r, C, frac, color, stroke, opacity = '1') => `
+  <circle class="arc" cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-opacity="${opacity}" stroke-width="${stroke}"
+    stroke-dasharray="${C} ${C}" stroke-dashoffset="${C * (1 - Math.min(1, frac))}" style="--len:${C}"
+    transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>`;
+
+/** Número que se anima al entrar */
+const counted = (n, d = 2) => (n == null ? '—' : `<span data-count="${n}" data-dec="${d}">${fmt(n, d)}</span>`);
+
 /** Anillo de progreso: puntos asegurados sobre 10 */
 function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
   const r = (size - stroke) / 2;
@@ -207,10 +263,8 @@ function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
   return `
     <svg class="ring" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" aria-hidden="true">
       <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="${stroke}"/>
-      ${done + pending > 0.005 ? `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-opacity=".28" stroke-width="${stroke}"
-        stroke-dasharray="${(done + pending) * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>` : ''}
-      ${done > 0.005 ? `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
-        stroke-dasharray="${done * C} ${C}" transform="rotate(-90 ${size / 2} ${size / 2})" stroke-linecap="round"/>` : ''}
+      ${done + pending > 0.005 ? arc(size, r, C, done + pending, color, stroke, '.28') : ''}
+      ${done > 0.005 ? arc(size, r, C, done, color, stroke) : ''}
       ${tick(pass)}
     </svg>`;
 }
@@ -273,16 +327,21 @@ function itemRow(it, { showSubject = true, showDate = true } = {}) {
     !showDate && it.time ? `<span>${it.time}</span>` : '',
     deliverable && it.done && g == null ? '<span class="text-good">Entregada</span>' : '',
   ].filter(Boolean).join('<i class="dot"></i>');
+  const swipeRight = deliverable && g == null ? 'done' : 'grade';
+  const rightLabel = swipeRight === 'done' ? (it.done ? `${I.undo} Pendiente` : `${I.check} Entregada`) : `${I.edit} Poner nota`;
   return `
-    <div class="row-item" style="--c:${subjColor(s)}">
-      <button class="row-main" data-action="edit-item" data-id="${it.id}">
-        <span class="kicon k-${it.kind}">${I[it.kind]}</span>
-        <span class="row-text">
-          <strong>${esc(it.title || S.KINDS[it.kind].label)}</strong>
-          <small>${showSubject && s ? `<b class="sdot"></b>${esc(S.shortName(s))}${meta ? '<i class="dot"></i>' : ''}` : ''}${meta}</small>
-        </span>
-      </button>
-      ${right}
+    <div class="row-item swipe" data-id="${it.id}" data-right="${swipeRight}" data-left="delete" data-left-out="1" data-long="item" style="--c:${subjColor(s)}">
+      <div class="swipe-bg"><span class="sw-right ${swipeRight}">${rightLabel}</span><span class="sw-left">Eliminar ${I.trash}</span></div>
+      <div class="row-slide">
+        <button class="row-main" data-action="edit-item" data-id="${it.id}">
+          <span class="kicon k-${it.kind}">${I[it.kind]}</span>
+          <span class="row-text">
+            <strong>${esc(it.title || S.KINDS[it.kind].label)}</strong>
+            <small>${showSubject && s ? `<b class="sdot"></b>${esc(S.shortName(s))}${meta ? '<i class="dot"></i>' : ''}` : ''}${meta}</small>
+          </span>
+        </button>
+        ${right}
+      </div>
     </div>`;
 }
 
@@ -373,7 +432,7 @@ function examCards() {
       const s = S.subject(it.subjectId);
       const n = S.daysUntil(it.date);
       return `
-        <button class="exam-card ${n <= 7 ? 'soon' : ''}" data-action="edit-item" data-id="${it.id}" style="--c:${subjColor(s)}">
+        <button class="exam-card ${n <= 7 ? 'soon' : ''}" data-action="edit-item" data-id="${it.id}" data-long="item" style="--c:${subjColor(s)}">
           <span class="exam-days"><b>${n === 0 ? 'Hoy' : n}</b>${n === 0 ? '' : n === 1 ? 'día' : 'días'}</span>
           <strong>${esc(s.name)}</strong>
           <small>${esc(it.title)}</small>
@@ -397,9 +456,9 @@ function statsRow() {
   const active = S.activeSubjects();
   return `
     <div class="stats">
-      <a class="stat" href="#/notas"><strong>${fmt(r.weighted)}</strong><span>Media</span></a>
-      <a class="stat" href="#/notas"><strong>${fmt(r.credits, 1)}</strong><span>Créditos</span></a>
-      <a class="stat" href="#/asignaturas"><strong>${active.length}</strong><span>En curso</span></a>
+      <a class="stat" href="#/notas"><strong>${counted(r.weighted)}</strong><span>Media</span></a>
+      <a class="stat" href="#/notas"><strong>${counted(r.credits, 1)}</strong><span>Créditos</span></a>
+      <a class="stat" href="#/asignaturas"><strong>${counted(active.length, 0)}</strong><span>En curso</span></a>
     </div>`;
 }
 
@@ -413,7 +472,7 @@ function subjectsGlance() {
       const c = S.calc(s);
       const info = statusInfo(s, c);
       return `
-        <a class="glance-item" href="#/asignatura/${s.id}" style="--c:${subjColor(s)}">
+        <a class="glance-item" href="#/asignatura/${s.id}" data-long="subject" data-id="${s.id}" style="--c:${subjColor(s)}">
           <span class="glance-name"><b class="sdot"></b>${esc(S.shortName(s))}</span>
           ${gradeBadge(c.current)}
           <small class="tone-${info.tone}">${c.status === 'ontrack' || c.status === 'hard' ? `Necesitas ${fmt(c.need)}` : esc(info.title)}</small>
@@ -448,6 +507,7 @@ function viewHome() {
   return `${head}
     ${S.state.demo ? `<div class="demo-note">${I.sparkle}<span>Estás viendo datos de ejemplo.</span><button class="btn sm" data-action="clear-demo">Empezar de cero</button></div>` : ''}
     ${nowCard()}
+    ${studyHomeCard()}
     ${todayList()}
     ${examCards()}
     ${pendingList()}
@@ -470,7 +530,7 @@ function subjectCard(s) {
   const next = S.itemsOf(s.id).filter((i) => i.date && i.date >= S.ymd() && S.isPending(i)).sort(S.byDate)[0];
   const info = statusInfo(s, c);
   return `
-    <a class="card subj" href="#/asignatura/${s.id}" style="--c:${subjColor(s)}">
+    <a class="card subj" href="#/asignatura/${s.id}" data-long="subject" data-id="${s.id}" style="--c:${subjColor(s)}">
       <div class="subj-top">
         <div class="subj-name">
           <strong>${esc(s.name)}</strong>
@@ -575,7 +635,7 @@ function heroHTML(s) {
       <div class="hero-ring">
         ${ring(s.final ? { points: +s.final.grade, pendingW: 0 } : c, { color: subjColor(s) })}
         <div class="ring-label">
-          <strong class="t-${S.gradeTone(g)}">${fmt(g)}</strong>
+          <strong class="t-${S.gradeTone(g)}">${counted(g)}</strong>
           <small>${s.final ? 'Nota final' : c.simulated ? 'Simulada' : 'Nota actual'}</small>
         </div>
       </div>
@@ -823,7 +883,7 @@ function scheduleTab(s) {
 
 function infoTab(s) {
   const topics = s.topics || [];
-  const done = topics.filter((t) => t.done).length;
+  const done = topics.filter((t) => St.confOf(t) >= 2).length;
   return `
     <h2 class="section-title">Profesorado</h2>
     ${(s.teachers || []).length ? `<div class="card flush">${s.teachers.map((t) => `
@@ -841,9 +901,9 @@ function infoTab(s) {
     ${topics.length ? `<div class="progress"><i style="width:${(done / topics.length) * 100}%;background:${subjColor(s)}"></i></div>` : ''}
     <div class="card flush topics">
       ${topics.map((t) => `
-        <div class="topic ${t.done ? 'done' : ''}">
-          <button class="tick ${t.done ? 'on' : ''}" data-action="toggle-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Marcar tema">${I.check}</button>
-          <span>${esc(t.name)}</span>
+        <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
+          ${confMeter(t, s)}
+          <span>${esc(t.name)}<small>${St.CONF[St.confOf(t)].label}</small></span>
           <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
         </div>`).join('')}
       <form class="topic-new" data-save="add-topic" data-id="${s.id}">
@@ -851,7 +911,7 @@ function infoTab(s) {
         <button class="icon-btn sm" type="submit" aria-label="Añadir tema">${I.plusSm}</button>
       </form>
     </div>
-    <p class="hint">Marca los temas que ya llevas estudiados.</p>
+    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas (sin empezar, flojo, bien, dominado). Con esto se reparte el estudio hasta el examen en la pestaña Estudio.</p>
 
     <h2 class="section-title">Enlaces</h2>
     ${(s.links || []).length ? `<div class="card flush">${s.links.map((l) => `
@@ -1042,7 +1102,7 @@ function agendaWeek() {
   const weekItems = items.sort(S.byDate);
 
   return `${head}
-    <div class="card wk-card">
+    <div class="card wk-card" data-swipe-nav="week">
       <div class="wk" style="--cols:${cols}">
         <div class="wk-corner"></div>
         ${days.slice(0, cols).map((d) => {
@@ -1095,7 +1155,7 @@ function agendaMonth() {
       <button class="wk-label" data-action="month" data-v="0"><strong>${title}</strong></button>
       <button class="icon-btn sm" data-action="month" data-v="1" aria-label="Mes siguiente">${I.right}</button>
     </div>
-    <div class="card month">
+    <div class="card month" data-swipe-nav="month">
       <div class="mgrid">${S.DAYS_SHORT.map((d) => `<span class="mh">${d}</span>`).join('')}${grid}</div>
       <div class="legend">
         <span><i class="k-examen"></i>Examen</span><span><i class="k-practica"></i>Práctica</span><span><i class="k-entrega"></i>Entrega</span><span><i class="k-otro"></i>Otro</span>
@@ -1164,7 +1224,7 @@ function viewRecord() {
     <div class="card record-hero">
       <div class="rh-main">
         <span class="m-label">Nota media</span>
-        <strong class="big t-${S.gradeTone(r.weighted)}">${fmt(r.weighted)}</strong>
+        <strong class="big t-${S.gradeTone(r.weighted)}">${counted(r.weighted)}</strong>
         <span class="muted small">${r.weighted == null ? 'Sin notas todavía' : S.gradeLabel(r.weighted) + ' · ponderada por créditos'}</span>
         ${r.simple != null ? `<span class="muted small">Media simple: ${fmt(r.simple)}</span>` : ''}
       </div>
@@ -1217,6 +1277,318 @@ function viewRecord() {
     ${!r.closed.length && !inProgress.length ? empty(I.cap, 'Tu expediente está vacío', 'Añade las asignaturas que ya has aprobado para calcular tu nota media.', '<button class="btn primary" data-action="add-past">Añadir asignatura aprobada</button>') : ''}
     ${r.closed.length || inProgress.length ? '<button class="btn ghost block mt" data-action="add-past">Añadir asignatura ya aprobada</button>' : ''}
     <p class="hint center">La media se calcula ponderando cada nota por sus créditos. La matrícula de honor cuenta como 10.</p>`;
+}
+
+// =============================================================
+//  ESTUDIO
+// =============================================================
+
+let studySubj = '';
+let studyTopic = '';
+const TR = 96; // radio del temporizador
+const TC = 2 * Math.PI * TR;
+
+const clock = (sec) => {
+  sec = Math.max(0, Math.ceil(sec));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+};
+const mins = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
+
+const studySubjects = () => S.activeSubjects().filter((s) => S.isThisYear(s) || !s.academicYear);
+
+function confMeter(t, s) {
+  const c = St.confOf(t);
+  return `<button class="conf c${c}" data-action="topic-conf" data-id="${s.id}" data-t="${t.id}" aria-label="Dominio: ${St.CONF[c].label}">
+    <i></i><i></i><i></i></button>`;
+}
+
+function timerCard() {
+  const x = S.state.study;
+  const t = x.timer;
+  const mode = t ? t.mode : x.next;
+  const sid = t ? t.subjectId : studySubj;
+  const sub = S.subject(sid);
+  const topic = t ? St.topicOf(t.subjectId, t.topicId) : St.topicOf(studySubj, studyTopic);
+  const total = t ? t.duration : St.nextMinutes(mode) * 60;
+  const left = t ? St.remaining() : total;
+  const color = mode === 'break' ? 'var(--good)' : sub ? subjColor(sub) : 'var(--accent)';
+  const running = St.isRunning();
+  const cycle = (x.cycle || 0) % 4;
+  const subs = studySubjects();
+  const selected = S.subject(studySubj);
+
+  let controls;
+  if (!t && mode === 'focus') {
+    controls = `<button class="btn primary block big-btn" data-action="study-go">${I.playBig} Empezar ${mins(+x.focus || 25)}</button>`;
+  } else if (!t) {
+    controls = `
+      <button class="btn primary block big-btn" data-action="study-go" data-mode="break">${I.playBig} Descanso de ${mins(St.nextMinutes('break'))}</button>
+      <button class="btn text block" data-action="study-skip">Saltar descanso</button>`;
+  } else {
+    controls = `
+      <div class="t-ctrls">
+        <button class="round-btn" data-action="study-stop" aria-label="Terminar">${I.stop}</button>
+        <button class="round-btn main" data-action="${running ? 'study-pause' : 'study-resume'}" aria-label="${running ? 'Pausa' : 'Seguir'}">${running ? I.pause : I.playBig}</button>
+        <button class="round-btn" data-action="study-plus" aria-label="Añadir 5 minutos">+5</button>
+      </div>`;
+  }
+
+  return `
+    <div class="card timer-card ${mode} ${running ? 'running' : ''}" style="--c:${color}">
+      <div class="t-mode">${mode === 'focus' ? `${I.brain.replace('width="40" height="40"', 'width="16" height="16"')} Estudio` : 'Descanso'}
+        <span class="t-dots">${[0, 1, 2, 3].map((i) => `<i class="${i < cycle ? 'on' : ''}"></i>`).join('')}</span></div>
+      <div class="t-ring">
+        <svg viewBox="0 0 220 220" aria-hidden="true">
+          <circle cx="110" cy="110" r="${TR}" fill="none" stroke="var(--surface-3)" stroke-width="12"/>
+          <circle class="t-arc" data-timer-arc cx="110" cy="110" r="${TR}" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${TC} ${TC}" stroke-dashoffset="${TC * (left / total)}" style="opacity:${left >= total - 0.5 ? 0 : 1}" transform="rotate(-90 110 110)"/>
+        </svg>
+        <div class="t-label">
+          <strong data-timer-text>${clock(left)}</strong>
+          <small>${t && !running ? 'En pausa' : sub ? esc(S.shortName(sub)) + (topic ? ' · ' + esc(topic.name) : '') : mode === 'break' ? 'Levántate y estírate' : 'Sin asignatura'}</small>
+        </div>
+      </div>
+      ${!t && mode === 'focus' ? `
+        <div class="t-pick">
+          <div class="chips scroll">
+            <button class="chip ${!studySubj ? 'on' : ''}" data-action="study-subj" data-v="">General</button>
+            ${subs.map((s) => `<button class="chip subj-chip ${studySubj === s.id ? 'on' : ''}" style="--c:${subjColor(s)}" data-action="study-subj" data-v="${s.id}"><b class="sdot"></b>${esc(S.shortName(s))}</button>`).join('')}
+          </div>
+          ${selected && (selected.topics || []).length ? `
+          <div class="chips scroll topics-pick">
+            ${[...selected.topics].sort((a, b) => St.confOf(a) - St.confOf(b)).map((tp) => `
+              <button class="chip ${studyTopic === tp.id ? 'on' : ''}" data-action="study-topic" data-v="${tp.id}"><span class="cdot c${St.confOf(tp)}"></span>${esc(tp.name)}</button>`).join('')}
+          </div>` : ''}
+          <div class="chips dur">${[15, 25, 45, 60].map((m) =>
+            `<button class="chip ${+x.focus === m ? 'on' : ''}" data-action="study-dur" data-v="${m}">${m} min</button>`).join('')}</div>
+        </div>` : ''}
+      ${controls}
+    </div>`;
+}
+
+function planList() {
+  const tasks = St.todayPlan();
+  if (!tasks.length) {
+    return `<div class="card plan-empty">${I.sparkle}<div><strong>Nada urgente</strong><p>No tienes exámenes en los próximos 30 días ni entregas cercanas. Buen momento para ir adelantando.</p></div></div>`;
+  }
+  return `<div class="plan">${tasks.slice(0, 6).map((t) => {
+    const col = subjColor(t.s);
+    if (t.type === 'deliver') {
+      return `
+        <div class="card plan-card" style="--c:${col}">
+          <div class="plan-head"><span class="kicon k-${t.item.kind}">${I[t.item.kind]}</span>
+            <div><strong>${esc(t.item.title)}</strong><small>${esc(S.shortName(t.s))} · se entrega ${rel(t.item.date).toLowerCase()}${t.item.time ? ' a las ' + t.item.time : ''}</small></div>
+            <button class="tick" data-action="toggle-done" data-id="${t.item.id}" aria-label="Marcar como entregada">${I.check}</button>
+          </div>
+        </div>`;
+    }
+    const head = `
+      <div class="plan-head">
+        <span class="plan-days ${t.daysLeft <= 7 ? 'soon' : ''}"><b>${t.daysLeft}</b>${t.daysLeft === 1 ? 'día' : 'días'}</span>
+        <div><strong>${esc(t.s.name)}</strong><small>${esc(t.exam.title)} · ${shortDate(t.exam.date)}</small></div>
+        <button class="round-btn sm" data-action="study-go" data-s="${t.s.id}" data-t="${t.topics?.[0]?.id || ''}" aria-label="Estudiar ahora">${I.play}</button>
+      </div>`;
+    if (t.type === 'notopics') {
+      return `<div class="card plan-card" style="--c:${col}">${head}
+        <p class="plan-text">Añade los temas que entran y te digo cuántos tocan cada día.</p>
+        <button class="btn sm ghost" data-action="go-topics" data-id="${t.s.id}">${I.plusSm} Añadir temas</button></div>`;
+    }
+    const known = t.total ? t.total - t.pending : 0;
+    return `<div class="card plan-card" style="--c:${col}">${head}
+      ${t.type === 'topics' ? `
+        <div class="plan-progress"><i style="width:${(known / t.total) * 100}%"></i></div>
+        <p class="plan-text">${t.pending === 1 ? 'Te queda 1 tema' : `Te quedan ${t.pending} de ${t.total} temas`} · hoy toca:</p>` : '<p class="plan-text">Lo llevas todo visto. Hoy, un repaso:</p>'}
+      <div class="plan-topics">${t.topics.map((tp) => `
+        <div class="plan-topic">${confMeter(tp, t.s)}<span>${esc(tp.name)}</span>
+          <button class="icon-btn ghost sm" data-action="study-go" data-s="${t.s.id}" data-t="${tp.id}" aria-label="Estudiar este tema">${I.play}</button></div>`).join('')}
+      </div></div>`;
+  }).join('')}</div>`;
+}
+
+function weekChart() {
+  const days = St.lastDays(7);
+  const max = Math.max(60, ...days.map((d) => d.total));
+  const total = days.reduce((a, d) => a + d.total, 0);
+  const today = S.ymd();
+  const subs = St.bySubject(7);
+  return `
+    <div class="card">
+      <div class="chart-head"><div><strong>${mins(total)}</strong><small>últimos 7 días · ${mins(Math.round(total / 7))} de media</small></div></div>
+      <div class="bars">${days.map((d) => `
+        <div class="bar-col ${d.date === today ? 'today' : ''}">
+          <div class="sbar" style="height:${(d.total / max) * 100}%">${[...d.bySubject].map(([sid, m]) =>
+            `<i style="flex:${m};background:${subjColor(S.subject(sid))}"></i>`).join('')}</div>
+          <small>${S.DAYS_SHORT[S.weekday(d.d) - 1]}</small>
+        </div>`).join('')}
+      </div>
+      ${subs.length ? `<div class="subj-time">${subs.map((x) => {
+        const sub = S.subject(x.subjectId);
+        return `<div class="st-row" style="--c:${subjColor(sub)}">
+          <span><b class="sdot"></b>${sub ? esc(S.shortName(sub)) : 'General'}</span>
+          <span class="st-bar"><i style="width:${(x.minutes / subs[0].minutes) * 100}%"></i></span>
+          <b>${mins(x.minutes)}</b></div>`;
+      }).join('')}</div>` : ''}
+    </div>`;
+}
+
+function sessionsList() {
+  const list = St.recentSessions(8);
+  if (!list.length) return '<p class="hint">Aquí aparecerán tus sesiones de estudio.</p>';
+  return `<div class="card flush">${list.map((x) => {
+    const sub = S.subject(x.subjectId);
+    const tp = St.topicOf(x.subjectId, x.topicId);
+    const when = x.date === S.ymd() ? 'Hoy' : S.daysUntil(x.date) === -1 ? 'Ayer' : dayMonth(x.date);
+    const hour = new Date(x.start).toTimeString().slice(0, 5);
+    return `
+      <div class="row-item swipe" data-id="${x.id}" data-left="del-session" data-left-out="1" style="--c:${subjColor(sub)}">
+        <div class="swipe-bg"><span class="sw-right"></span><span class="sw-left">Borrar ${I.trash}</span></div>
+        <div class="row-slide">
+          <div class="row-main static">
+            <span class="kicon">${I.timer}</span>
+            <span class="row-text"><strong>${sub ? esc(sub.name) : 'Estudio general'}</strong>
+            <small>${when} · ${hour}${tp ? ' · ' + esc(tp.name) : ''}</small></span>
+          </div>
+          <b class="sess-min">${mins(x.minutes)}</b>
+        </div>
+      </div>`;
+  }).join('')}</div>
+  <p class="hint">Desliza una sesión a la izquierda para borrarla.</p>`;
+}
+
+function viewStudy() {
+  const x = S.state.study;
+  const today = St.minutesOn(S.ymd());
+  const goal = +x.goal || 120;
+  const streak = St.streak();
+  const frac = Math.min(1, today / goal);
+  const C = 2 * Math.PI * 22;
+  return `
+    <header class="top">
+      <div><p class="eyebrow">${longDate(S.ymd())}</p><h1>Estudio</h1></div>
+      <button class="icon-btn" data-action="study-settings" aria-label="Ajustes de estudio">${I.gear}</button>
+    </header>
+
+    <div class="goal-row">
+      <div class="goal-ring">
+        <svg viewBox="0 0 52 52" width="52" height="52" aria-hidden="true">
+          <circle cx="26" cy="26" r="22" fill="none" stroke="var(--surface-3)" stroke-width="6"/>
+          <circle class="arc" cx="26" cy="26" r="22" fill="none" stroke="${frac >= 1 ? 'var(--good)' : 'var(--accent)'}" stroke-width="6" stroke-linecap="round"
+            stroke-dasharray="${C} ${C}" stroke-dashoffset="${C * (1 - frac)}" style="--len:${C}" transform="rotate(-90 26 26)"/>
+        </svg>
+      </div>
+      <div class="goal-text">
+        <strong><span data-count="${today}" data-dec="0">${today}</span> de ${goal} min hoy</strong>
+        <small>${frac >= 1 ? '¡Objetivo cumplido!' : `Te faltan ${mins(goal - today)}`}</small>
+      </div>
+      <div class="streak ${streak ? 'on' : ''}">${I.flame}<b>${streak}</b><small>${streak === 1 ? 'día' : 'días'}</small></div>
+    </div>
+
+    ${timerCard()}
+
+    <h2 class="section-title">Qué estudiar hoy</h2>
+    ${planList()}
+
+    <h2 class="section-title">Tu semana</h2>
+    ${weekChart()}
+
+    <h2 class="section-title">Sesiones <button class="link right" data-action="add-session">${I.plusSm} Añadir a mano</button></h2>
+    ${sessionsList()}`;
+}
+
+// --- Tarjeta de estudio en Hoy ---
+
+function studyHomeCard() {
+  const x = S.state.study;
+  const today = St.minutesOn(S.ymd());
+  const goal = +x.goal || 120;
+  const plan = St.todayPlan().find((t) => t.type === 'topics' || t.type === 'review');
+  const frac = Math.min(1, today / goal);
+  return `
+    <a class="card study-home" href="#/estudio">
+      <div class="sh-bar"><i style="width:${frac * 100}%"></i></div>
+      <div class="sh-row">
+        <div><strong>${today ? `${mins(today)} estudiados hoy` : 'Hoy aún no has estudiado'}</strong>
+        <small>${plan ? `Toca: ${esc(plan.topics.map((t) => t.name).slice(0, 2).join(', '))} (${esc(S.shortName(plan.s))})` : `Objetivo: ${mins(goal)} al día`}</small></div>
+        <button class="round-btn sm main" data-action="study-go" ${plan ? `data-s="${plan.s.id}" data-t="${plan.topics[0]?.id || ''}"` : ''} aria-label="Empezar a estudiar">${I.play}</button>
+      </div>
+    </a>`;
+}
+
+// --- Temporizador: cada segundo ---
+
+let finishing = false;
+function tickStudy() {
+  const t = St.timer();
+  document.body.classList.toggle('has-timer', !!t && route().name !== 'estudio');
+  if (!t) { miniEl.hidden = true; return; }
+  const left = St.remaining();
+  if (left <= 0 && !finishing) { completeBlock(); return; }
+  document.querySelectorAll('[data-timer-text]').forEach((el) => { el.textContent = clock(left); });
+  document.querySelectorAll('[data-timer-arc]').forEach((el) => {
+    el.setAttribute('stroke-dashoffset', TC * (left / t.duration));
+    el.style.opacity = left >= t.duration - 0.5 ? 0 : 1;
+  });
+  // Barra pequeña en el resto de pantallas
+  if (route().name === 'estudio' || !overlay.hidden && overlay.querySelector('.wizard')) { miniEl.hidden = true; return; }
+  const sub = S.subject(t.subjectId);
+  const running = t.pausedLeft == null;
+  miniEl.hidden = false;
+  miniEl.style.setProperty('--c', t.mode === 'break' ? 'var(--good)' : subjColor(sub));
+  miniEl.style.setProperty('--p', `${St.progress() * 100}%`);
+  const label = t.mode === 'break' ? 'Descanso' : sub ? esc(S.shortName(sub)) : 'Estudio';
+  const html = `
+    <a href="#/estudio" class="mt-main"><span class="mt-dot"></span><span>${label}</span><b>${clock(left)}</b></a>
+    <button class="mt-btn" data-action="${running ? 'study-pause' : 'study-resume'}" aria-label="${running ? 'Pausa' : 'Seguir'}">${running ? I.pause : I.play}</button>`;
+  if (miniEl.dataset.k !== `${label}|${running}`) {
+    miniEl.innerHTML = html;
+    miniEl.dataset.k = `${label}|${running}`;
+  } else {
+    miniEl.querySelector('b').textContent = clock(left);
+  }
+}
+setInterval(tickStudy, 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) tickStudy(); });
+
+/** Fin de un bloque: guarda la sesión y celebra */
+function completeBlock() {
+  finishing = true;
+  const res = St.finish();
+  finishing = false;
+  if (!res) return;
+  St.chime();
+  haptic('success');
+  render();
+  if (res.mode === 'break') {
+    toast('Descanso terminado. ¡A por otro bloque!');
+    return;
+  }
+  confetti({ power: 0.8 });
+  const sub = S.subject(res.subjectId);
+  const tp = St.topicOf(res.subjectId, res.topicId);
+  const today = St.minutesOn(S.ymd());
+  openOverlay(`
+    <div class="sheet auto done-sheet" role="dialog" aria-modal="true" aria-label="Bloque terminado">
+      ${sheetHead('¡Bloque terminado!')}
+      <div class="sheet-body">
+        <p class="done-big">+${res.session ? res.session.minutes : 0} min</p>
+        <p class="menu-sub center">${sub ? esc(sub.name) : 'Estudio general'} · llevas ${mins(today)} hoy</p>
+        ${tp ? `
+          <p class="field-label">¿Cómo llevas «${esc(tp.name)}»?</p>
+          <div class="conf-pick">${St.CONF.map((c, i) =>
+            `<button class="conf-opt c${i} ${St.confOf(tp) === i ? 'on' : ''}" data-action="set-conf" data-id="${sub.id}" data-t="${tp.id}" data-c="${i}"><span class="conf c${i}"><i></i><i></i><i></i></span>${c.label}</button>`).join('')}</div>` : ''}
+        <button class="btn primary block mt" data-action="study-go" data-mode="break">${I.playBig} Descanso de ${mins(St.nextMinutes('break'))}</button>
+        <button class="btn block" data-action="study-again">Otro bloque de estudio</button>
+        <button class="btn text block" data-action="close">Terminar por hoy</button>
+      </div>
+    </div>`, 'bottom');
+}
+
+function removeSession(id) {
+  const r = St.deleteSession(id);
+  if (!r) return;
+  haptic();
+  render();
+  undoable(`Sesión de ${mins(r.s.minutes)} borrada`, () => St.restoreSession(r));
 }
 
 // =============================================================
@@ -1298,6 +1670,8 @@ function closeOverlay() {
   overlay.className = '';
   document.body.classList.remove('locked');
   sheetCtx = null;
+  wz = null;
+  pad = null;
   if (pending) { const p = pending; pending = null; p(false); }
 }
 
@@ -1418,6 +1792,229 @@ function openSubjectSheet(id, term) {
     <div class="field"><span>Color</span>${swatches(s.color)}</div>`, 'save-subject');
 }
 
+// --- Asistente para crear una asignatura paso a paso ---
+
+let wz = null;
+
+function openWizard(term) {
+  const active = S.activeSubjects();
+  const years = active.map((x) => x.year);
+  const year = years.length ? years.sort((a, b) => years.filter((y) => y === b).length - years.filter((y) => y === a).length)[0] : 1;
+  wz = {
+    step: 0,
+    d: {
+      name: '', short: '', color: S.PALETTE[S.state.subjects.length % S.PALETTE.length],
+      credits: 6, year, term: term || S.currentTerm(), split: true,
+      p1w: 50, p2w: 50, p1m: '', p2m: '',
+      groupT: '', groupP: '', room: '', roomP: '',
+      slots: [], slotType: 'Teoría', slotDay: 1, slotStart: '09:00', slotEnd: '10:30',
+      evalMode: 'tp', wt: 70, mt: '', mp: '',
+    },
+  };
+  openOverlay('<div class="wizard" role="dialog" aria-modal="true" aria-label="Nueva asignatura"></div>', 'full');
+  renderWizard();
+}
+
+const wzSteps = () => ['name', 'basics', ...(wz.d.term === 'A' ? ['annual'] : []), 'groups', 'schedule', 'eval', 'summary'];
+
+const optCard = (k, v, cur, title, sub, icon = '') => `
+  <button type="button" class="opt-card ${String(cur) === String(v) ? 'on' : ''}" data-action="wz-set" data-k="${k}" data-v="${esc(v)}">
+    ${icon ? `<span class="opt-ic">${icon}</span>` : ''}<span class="opt-text"><strong>${title}</strong>${sub ? `<small>${sub}</small>` : ''}</span>
+    <span class="opt-check">${I.check}</span>
+  </button>`;
+
+const wzChips = (k, list, cur) => `<div class="chips">${list.map(([v, l]) =>
+  `<button type="button" class="chip ${String(cur) === String(v) ? 'on' : ''}" data-action="wz-set" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div>`;
+
+const wzIn = (k, attrs = '') => `<input class="input" data-wz="${k}" value="${esc(wz.d[k] ?? '')}" autocomplete="off" ${attrs}>`;
+
+function wzStepHTML(step) {
+  const d = wz.d;
+  switch (step) {
+    case 'name': return `
+      <h2>¿Cómo se llama?</h2>
+      <p class="wz-sub">El nombre completo, como sale en la matrícula.</p>
+      ${wzIn('name', 'placeholder="Ej. Análisis y Diseño de Datos y Algoritmos" autocapitalize="sentences" enterkeyhint="next" data-autofocus')}
+      ${field('Abreviatura (para el horario)', wzIn('short', `placeholder="${esc(d.name ? S.shortName({ name: d.name }) : 'Ej. ADDA')}" maxlength="8" enterkeyhint="next"`))}
+      <div class="field"><span>Color</span><div class="swatches">${S.PALETTE.map((c) =>
+        `<button type="button" class="swatch ${c === d.color ? 'on' : ''}" style="--c:${c}" data-action="wz-set" data-k="color" data-v="${c}" aria-label="Color"></button>`).join('')}</div></div>
+      <button type="button" class="link center-link" data-action="wz-form">Prefiero el formulario completo</button>`;
+    case 'basics': return `
+      <h2>Lo básico</h2>
+      <div class="field"><span>Créditos</span>${wzChips('credits', [[3, '3'], [4.5, '4,5'], [6, '6'], [9, '9'], [12, '12']], d.credits)}</div>
+      <div class="field"><span>Curso</span>${wzChips('year', [1, 2, 3, 4, 5].map((y) => [y, `${y}.º`]), d.year)}</div>
+      <div class="field"><span>¿Cuándo se da?</span>
+        <div class="opt-list">
+          ${optCard('term', 'C1', d.term, '1.er cuatrimestre', 'De septiembre a enero')}
+          ${optCard('term', 'C2', d.term, '2.º cuatrimestre', 'De febrero a junio')}
+          ${optCard('term', 'A', d.term, 'Anual', 'Todo el curso, como ADDA')}
+        </div>
+      </div>`;
+    case 'annual': return `
+      <h2>¿Cómo se evalúa durante el año?</h2>
+      <p class="wz-sub">Así sé cómo calcular tu nota.</p>
+      <div class="opt-list">
+        ${optCard('split', 'false', String(d.split), 'Una evaluación para todo el curso', 'Teoría y prácticas con parciales en cada cuatri que hacen media al final (como ADDA)')}
+        ${optCard('split', 'true', String(d.split), 'Una nota en cada cuatrimestre', 'Cada cuatri se aprueba por separado y la final sale de las dos')}
+      </div>
+      ${d.split ? `
+        <div class="tp-grid flat mt">
+          <span></span><b>1.er cuatri</b><b>2.º cuatri</b>
+          <small>Peso %</small>${wzIn('p1w', 'inputmode="decimal"')}${wzIn('p2w', 'inputmode="decimal"')}
+          <small>Mínimo</small>${wzIn('p1m', 'inputmode="decimal" placeholder="—"')}${wzIn('p2m', 'inputmode="decimal" placeholder="—"')}
+        </div>` : ''}`;
+    case 'groups': return `
+      <h2>Grupos y aulas</h2>
+      <p class="wz-sub">Tus grupos de teoría y de prácticas, y dónde son las clases. Puedes saltártelo.</p>
+      <div class="tp-grid">
+        <span></span><b class="teoria">Teoría</b><b class="practicas">Prácticas</b>
+        <small>Grupo</small>${wzIn('groupT', 'placeholder="Ej. T1"')}${wzIn('groupP', 'placeholder="Ej. L3"')}
+        <small>Aula</small>${wzIn('room', 'placeholder="Ej. A3.10"')}${wzIn('roomP', 'placeholder="Ej. L2.05"')}
+      </div>`;
+    case 'schedule': {
+      const sorted = [...d.slots].sort((a, b) => a.day - b.day || S.minutes(a.start) - S.minutes(b.start));
+      const h = d.slots.reduce((a, x) => a + (S.minutes(x.end) - S.minutes(x.start)) / 60, 0);
+      return `
+      <h2>¿Cuándo tienes clase?</h2>
+      <p class="wz-sub">Añade cada clase de la semana. Puedes saltártelo y ponerlo luego.</p>
+      <div class="card wz-slot">
+        ${wzChips('slotType', [['Teoría', 'Teoría'], ['Prácticas', 'Prácticas'], ['Laboratorio', 'Laboratorio']], d.slotType)}
+        <div class="day-pick">${[1, 2, 3, 4, 5].map((n) =>
+          `<button type="button" class="${+d.slotDay === n ? 'on' : ''}" data-action="wz-set" data-k="slotDay" data-v="${n}">${S.DAYS_SHORT[n - 1]}</button>`).join('')}</div>
+        <div class="two">
+          ${field('Empieza', `<input class="input" type="time" data-wz="slotStart" value="${esc(d.slotStart)}">`)}
+          ${field('Termina', `<input class="input" type="time" data-wz="slotEnd" value="${esc(d.slotEnd)}">`)}
+        </div>
+        <button type="button" class="btn block mt" data-action="wz-add-slot">${I.plusSm} Añadir ${S.DAYS[d.slotDay - 1].toLowerCase()} ${esc(d.slotStart)}</button>
+      </div>
+      ${sorted.length ? `
+        <div class="card flush mt">${sorted.map((x) => `
+          <div class="tl-row" style="--c:${d.color}">
+            <span class="tl-time"><b>${S.DAYS[x.day - 1].slice(0, 3)}</b><small>${x.start}</small></span>
+            <span class="tl-bar ${S.slotArea(x.type)}"></span>
+            <span class="row-text"><strong>${esc(x.type)} · ${x.start}–${x.end}</strong></span>
+            <button type="button" class="icon-btn ghost sm" data-action="wz-del-slot" data-i="${d.slots.indexOf(x)}" aria-label="Quitar">${I.xs}</button>
+          </div>`).join('')}
+        </div>
+        <p class="hint">${fmt(h, 1)} h de clase a la semana</p>` : ''}`;
+    }
+    case 'eval': {
+      const annualWhole = d.term === 'A' && !d.split;
+      const presetIdx = S.PRESETS.findIndex((x) => x.annual);
+      return `
+      <h2>¿Cómo se evalúa?</h2>
+      <p class="wz-sub">Mira la guía docente. Luego puedes ajustar cada apartado.</p>
+      <div class="opt-list">
+        ${annualWhole ? optCard('evalMode', presetIdx, d.evalMode, 'Como ADDA', 'Teoría 60 % y prácticas 40 % con parciales y controles en cada cuatri, y cuestionarios opcionales', I.wand) : ''}
+        ${optCard('evalMode', 'tp', d.evalMode, 'Teoría + prácticas', 'Tú eliges el peso de cada una')}
+        ${d.evalMode === 'tp' ? `
+          <div class="card tp-slider">
+            <div class="tp-labels"><span class="teoria">Teoría <b data-wt-t>${d.wt} %</b></span><span class="practicas">Prácticas <b data-wt-p>${100 - d.wt} %</b></span></div>
+            <input type="range" min="0" max="100" step="5" data-wz="wt" value="${d.wt}" class="range" style="--v:${d.wt}%">
+            <div class="two mt">
+              ${field('Mínimo teoría', wzIn('mt', 'inputmode="decimal" placeholder="—"'))}
+              ${field('Mínimo prácticas', wzIn('mp', 'inputmode="decimal" placeholder="—"'))}
+            </div>
+          </div>` : ''}
+        ${S.PRESETS.map((x, i) => (x.annual || x.name === 'Teoría + prácticas' ? '' : optCard('evalMode', i, d.evalMode, x.name, x.desc || x.comps.map((c) => `${c.name} ${c.weight} %`).join(' · ')))).join('')}
+        ${optCard('evalMode', 'later', d.evalMode, 'Lo configuro después', '')}
+      </div>`;
+    }
+    case 'summary': {
+      const ev = d.evalMode === 'tp' ? `Teoría ${d.wt} % + prácticas ${100 - d.wt} %` : d.evalMode === 'later' ? 'Sin configurar' : S.PRESETS[+d.evalMode].name;
+      const rows = [
+        ['Créditos y curso', `${fmt(d.credits, 1)} ECTS · ${d.year}.º`],
+        ['Cuándo', S.TERMS[d.term] + (d.term === 'A' ? (d.split ? ' · nota por cuatri' : ' · todo el curso') : '')],
+        ['Grupos', [d.groupT && `T: ${esc(d.groupT)}`, d.groupP && `P: ${esc(d.groupP)}`].filter(Boolean).join(' · ') || '—'],
+        ['Clases', d.slots.length ? `${d.slots.length} a la semana` : '—'],
+        ['Evaluación', ev],
+      ];
+      return `
+      <div class="wz-hero" style="--c:${d.color}">
+        <span class="wz-badge">${esc(d.short || S.shortName({ name: d.name }))}</span>
+        <h2>${esc(d.name)}</h2>
+      </div>
+      <div class="card flush">${rows.map(([k, v]) => `<div class="sum-row"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+      <p class="hint center">Todo se puede cambiar después desde la asignatura.</p>`;
+    }
+    default: return '';
+  }
+}
+
+function renderWizard(dir = 0) {
+  const box = overlay.querySelector('.wizard');
+  if (!box || !wz) return;
+  const steps = wzSteps();
+  wz.step = Math.min(wz.step, steps.length - 1);
+  const step = steps[wz.step];
+  const last = wz.step === steps.length - 1;
+  const skippable = ['groups', 'schedule'].includes(step);
+  box.innerHTML = `
+    <div class="wz-top">
+      <button class="icon-btn" data-action="${wz.step ? 'wz-back' : 'close'}" aria-label="${wz.step ? 'Atrás' : 'Cerrar'}">${wz.step ? I.back : I.x}</button>
+      <div class="wz-progress"><i style="width:${((wz.step + 1) / steps.length) * 100}%"></i></div>
+      <span class="wz-count">${wz.step + 1}/${steps.length}</span>
+    </div>
+    <form class="wz-body ${dir > 0 ? 'in-fwd' : dir < 0 ? 'in-back' : ''}" data-save="wz-next" novalidate>${wzStepHTML(step)}</form>
+    <div class="wz-foot">
+      <button class="btn primary block" data-action="wz-next">${last ? `${I.check} Crear asignatura` : 'Siguiente'}</button>
+      ${skippable ? '<button class="btn text block" data-action="wz-skip">Saltar</button>' : ''}
+    </div>`;
+  const af = box.querySelector('[data-autofocus]');
+  if (af && dir >= 0 && !af.value) setTimeout(() => af.focus(), 320);
+}
+
+function wzNext(skip = false) {
+  const steps = wzSteps();
+  const step = steps[wz.step];
+  const d = wz.d;
+  if (step === 'name' && !d.name.trim()) {
+    haptic('heavy');
+    overlay.querySelector('[data-wz="name"]')?.focus();
+    toast('Ponle un nombre');
+    return;
+  }
+  if (step === 'schedule' && skip) d.slots = [];
+  if (wz.step === steps.length - 1) return wzCreate();
+  haptic();
+  wz.step++;
+  renderWizard(1);
+}
+
+function wzCreate() {
+  const d = wz.d;
+  const roomFor = (type) => (S.slotArea(type) === 'practicas' ? d.roomP : d.room);
+  const s = S.newSubject({
+    name: d.name.trim(),
+    short: d.short.trim(),
+    color: d.color,
+    credits: +d.credits || 6,
+    year: +d.year || 1,
+    term: d.term,
+    groupT: d.groupT.trim(),
+    groupP: d.groupP.trim(),
+    room: d.room.trim(),
+    roomP: d.roomP.trim(),
+    split: d.term === 'A' && d.split,
+    periods: {
+      C1: { weight: parseNum(d.p1w) ?? 50, min: parseNum(d.p1m) },
+      C2: { weight: parseNum(d.p2w) ?? 50, min: parseNum(d.p2m) },
+    },
+    slots: d.slots.map((x) => ({ id: S.uid(), ...x, room: roomFor(x.type) || '', group: '' })),
+  });
+  S.state.subjects.push(s);
+  if (d.evalMode === 'tp') S.setupTheoryPractice(s, { wt: +d.wt, wp: 100 - d.wt, mt: parseNum(d.mt), mp: parseNum(d.mp) });
+  else if (d.evalMode !== 'later') S.applyPreset(s, S.PRESETS[+d.evalMode]);
+  S.save();
+  wz = null;
+  closeOverlay();
+  subjTab[s.id] = 'eval';
+  go(`#/asignatura/${s.id}`);
+  haptic('success');
+  confetti({ power: 1, colors: [s.color, '#ffffff', '#f7c948'] });
+  toast(`${s.short || S.shortName(s)} creada`);
+}
+
 // --- Asignatura ya aprobada (para el expediente) ---
 
 function openPastSheet() {
@@ -1507,6 +2104,12 @@ function defaultComp(s, kind) {
   if (!s) return '';
   const area = kind === 'examen' ? 'teoria' : kind === 'otro' ? 'otro' : 'practicas';
   return (s.comps.find((c) => c.kind === kind) || s.comps.find((c) => S.areaOf(c) === area))?.id || '';
+}
+
+/** Suma minutos a una hora HH:MM */
+function addMin(hhmm, m) {
+  const t = S.minutes(hhmm) + m;
+  return `${String(Math.floor(t / 60) % 24).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
 }
 
 const placeholderFor = (k) => ({
@@ -1647,6 +2250,226 @@ async function shareFile(name, content, type) {
 }
 
 // =============================================================
+//  INTERACCIÓN: gestos, menús, teclado de notas y deshacer
+// =============================================================
+
+// --- Deshacer ---
+
+let lastUndo = null;
+let snackTimer;
+function undoable(msg, undo) {
+  lastUndo = undo;
+  snackEl.innerHTML = `<span>${esc(msg)}</span><button data-action="undo">Deshacer</button>`;
+  snackEl.classList.add('show');
+  clearTimeout(snackTimer);
+  snackTimer = setTimeout(() => { snackEl.classList.remove('show'); lastUndo = null; }, 5000);
+}
+
+function removeItem(id) {
+  const i = S.state.items.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  const [it] = S.state.items.splice(i, 1);
+  S.save();
+  haptic();
+  render();
+  undoable(`"${it.title}" eliminado`, () => {
+    S.state.items.splice(i, 0, it);
+    S.save();
+  });
+}
+
+/** "Práctica 2" → "Práctica 3" al duplicar */
+const nextTitle = (t = '') => (/\d+(?!.*\d)/.test(t) ? t.replace(/(\d+)(?!.*\d)/, (n) => +n + 1) : `${t} (copia)`);
+
+function toggleDone(id, fromEl) {
+  const it = S.item(id);
+  if (!it) return;
+  it.done = !it.done;
+  S.save();
+  const r = fromEl?.getBoundingClientRect();
+  haptic(it.done ? 'success' : 'light');
+  render();
+  if (it.done && r) confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, power: 0.35 });
+  undoable(it.done ? `"${it.title}" entregada` : 'Marcada como pendiente', () => {
+    it.done = !it.done;
+    S.save();
+  });
+}
+
+// --- Gestos ---
+
+onGestures({
+  swipe: (row, act) => {
+    const id = row.dataset.id;
+    if (act === 'done') toggleDone(id, row);
+    else if (act === 'grade') openGradePad(id);
+    else if (act === 'delete') removeItem(id);
+    else if (act === 'del-session') removeSession(id);
+  },
+  long: (el) => {
+    if (el.dataset.long === 'item') itemMenu(el.dataset.id);
+    else if (el.dataset.long === 'subject') subjectMenu(el.dataset.id);
+  },
+  nav: (el, dir) => {
+    if (el.dataset.swipeNav === 'week') {
+      weekOffset += dir;
+    } else {
+      monthOffset += dir;
+      const t = new Date();
+      selDay = monthOffset === 0 ? S.ymd() : S.ymd(new Date(t.getFullYear(), t.getMonth() + monthOffset, 1));
+    }
+    renderTab();
+  },
+});
+
+// --- Menús al mantener pulsado ---
+
+function menu(title, sub, options, extra = '') {
+  openOverlay(`
+    <div class="sheet auto menu" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      ${sheetHead(esc(title))}
+      <div class="sheet-body">
+        ${sub ? `<p class="menu-sub">${sub}</p>` : ''}
+        ${extra}
+        <div class="menu-list">${options.filter(Boolean).map((o) => `
+          <button class="menu-item ${o.danger ? 'danger' : ''}" data-action="${o.action}" ${o.data || ''}>
+            <span class="menu-ic">${o.icon || ''}</span><span>${o.label}</span>
+          </button>`).join('')}
+        </div>
+      </div>
+    </div>`, 'bottom');
+}
+
+function itemMenu(id) {
+  const it = S.item(id);
+  if (!it) return;
+  const s = S.subject(it.subjectId);
+  const deliv = it.kind === 'practica' || it.kind === 'entrega';
+  menu(it.title || S.KINDS[it.kind].label,
+    `${s ? esc(s.name) : ''}${it.date ? ' · ' + shortDate(it.date) + (it.time ? ' · ' + it.time : '') : ''}`, [
+      { icon: I.edit, label: it.grade == null ? 'Poner nota' : `Cambiar nota (${fmt(it.grade)})`, action: 'grade-pad', data: `data-id="${id}"` },
+      deliv && { icon: it.done ? I.undo : I.check, label: it.done ? 'Marcar como pendiente' : 'Marcar como entregada', action: 'toggle-done', data: `data-id="${id}"` },
+      s && !s.final && { icon: I.timer, label: `Estudiar ${esc(S.shortName(s))} ahora`, action: 'study-now', data: `data-s="${s.id}"` },
+      { icon: I.list, label: 'Editar', action: 'edit-item', data: `data-id="${id}"` },
+      { icon: I.copy, label: 'Duplicar', action: 'dup-item', data: `data-id="${id}"` },
+      it.date && { icon: I.calAdd, label: 'Añadir al calendario', action: 'item-ics', data: `data-id="${id}"` },
+      { icon: I.trash, label: 'Eliminar', action: 'del-item', data: `data-id="${id}"`, danger: true },
+    ]);
+}
+
+function subjectMenu(id) {
+  const s = S.subject(id);
+  if (!s) return;
+  const c = S.calc(s);
+  menu(s.name, `${fmt(s.credits, 1)} ECTS · ${S.TERMS[s.term]}${c.current != null ? ` · llevas un ${fmt(c.current)}` : ''}`, [
+    !s.final && { icon: I.timer, label: 'Estudiar ahora', action: 'study-now', data: `data-s="${s.id}"` },
+    !s.final && { icon: I.examen, label: 'Añadir examen', action: 'new-item', data: `data-s="${s.id}" data-k="examen"` },
+    !s.final && { icon: I.practica, label: 'Añadir práctica', action: 'new-item', data: `data-s="${s.id}" data-k="practica"` },
+    !s.final && { icon: I.entrega, label: 'Añadir entrega', action: 'new-item', data: `data-s="${s.id}" data-k="entrega"` },
+    { icon: I.edit, label: 'Editar asignatura', action: 'edit-subject', data: `data-id="${s.id}"` },
+  ], `<div class="swatches menu-colors">${S.PALETTE.map((col) =>
+    `<button type="button" class="swatch ${col === s.color ? 'on' : ''}" style="--c:${col}" data-action="set-color" data-id="${s.id}" data-c="${col}" aria-label="Color"></button>`).join('')}</div>`);
+}
+
+// --- Teclado para poner notas ---
+
+let pad = null;
+
+function openGradePad(id) {
+  const it = S.item(id);
+  if (!it) return;
+  const s = S.subject(it.subjectId);
+  pad = { id, value: it.grade == null ? '' : fmt(it.grade) };
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'];
+  const max = +it.max || 10;
+  openOverlay(`
+    <div class="sheet auto pad-sheet" role="dialog" aria-modal="true" aria-label="Poner nota">
+      ${sheetHead(esc(it.title || 'Nota'))}
+      <div class="sheet-body">
+        <p class="menu-sub">${s ? `<b class="sdot" style="--c:${subjColor(s)}"></b>${esc(s.name)} · ` : ''}sobre ${fmt(max)}${it.min != null && it.min !== '' ? ` · mínimo ${fmt(it.min)}` : ''}</p>
+        <div class="pad-display" id="pad-display"></div>
+        <p class="pad-impact" id="pad-impact"></p>
+        <div class="pad-quick">${[5, 6, 7, 8, 9, 10].map((n) => {
+          const v = (n / 10) * max;
+          return `<button class="chip" data-action="pad-key" data-k="=${v}">${fmt(v)}</button>`;
+        }).join('')}</div>
+        <div class="keypad">${keys.map((k) =>
+          `<button class="key ${k === 'del' ? 'fn' : ''}" data-action="pad-key" data-k="${k}">${k === 'del' ? I.undo : k}</button>`).join('')}</div>
+        <div class="two mt">
+          <button class="btn" data-action="pad-clear">Quitar nota</button>
+          <button class="btn primary" data-action="pad-save">Guardar</button>
+        </div>
+      </div>
+    </div>`, 'bottom');
+  updatePad();
+}
+
+function padKey(k) {
+  if (!pad) return;
+  const it = S.item(pad.id);
+  const max = +it.max || 10;
+  let v = pad.value;
+  if (k.startsWith('=')) v = fmt(+k.slice(1));
+  else if (k === 'del') v = v.slice(0, -1);
+  else if (k === ',') { if (!v.includes(',')) v = (v || '0') + ','; } else {
+    const next = v === '0' ? k : v + k;
+    const dec = next.split(',')[1];
+    if (dec && dec.length > 2) return;
+    if (parseNum(next) > max) { haptic('heavy'); shake(); return; }
+    v = next;
+  }
+  pad.value = v;
+  haptic();
+  updatePad();
+}
+
+function shake() {
+  const d = document.getElementById('pad-display');
+  d?.classList.remove('shake');
+  void d?.offsetWidth;
+  d?.classList.add('shake');
+}
+
+function updatePad() {
+  const it = S.item(pad.id);
+  const s = S.subject(it.subjectId);
+  const n = parseNum(pad.value);
+  const min = it.min === '' || it.min == null ? null : +it.min;
+  const d = document.getElementById('pad-display');
+  const tone = n == null ? 'none' : S.gradeTone((n / (+it.max || 10)) * 10);
+  d.className = `pad-display t-${tone} ${min != null && n != null && n < min ? 'low' : ''}`;
+  d.innerHTML = pad.value ? esc(pad.value) : '<span>—</span>';
+  // Cómo quedaría la asignatura con esta nota
+  const imp = document.getElementById('pad-impact');
+  if (!s || n == null) { imp.textContent = 'Escribe la nota o elige una rápida.'; return; }
+  const c = S.calc(s, { [it.id]: n });
+  const parts = [];
+  if (min != null && n < min) parts.push(`<b class="text-bad">Por debajo del mínimo (${fmt(min)})</b>`);
+  if (c.current != null) parts.push(`Tu nota quedaría en <b class="t-${S.gradeTone(c.current)}">${fmt(c.current)}</b>`);
+  if (c.need != null && c.need > 0 && c.status !== 'start') parts.push(`necesitarías un ${fmt(c.need)} en lo que queda`);
+  if (c.status === 'secured') parts.push('<b class="text-good">aprobado asegurado</b>');
+  imp.innerHTML = parts.join(' · ');
+}
+
+function padSave() {
+  const it = S.item(pad.id);
+  const n = parseNum(pad.value);
+  it.grade = n;
+  if (n != null && it.kind !== 'examen') it.done = true;
+  S.save();
+  const max = +it.max || 10;
+  closeOverlay();
+  render();
+  if (n == null) { toast('Nota quitada'); return; }
+  const g10 = (n / max) * 10;
+  const min = it.min === '' || it.min == null ? null : +it.min;
+  if (min != null && n < min) { haptic('heavy'); toast(`${fmt(n)}: no llegas al mínimo`); return; }
+  haptic('success');
+  toast(`Nota guardada: ${fmt(n)}`);
+  if (g10 >= 9) confetti({ power: 0.9 });
+}
+
+// =============================================================
 //  ACCIONES
 // =============================================================
 
@@ -1689,9 +2512,41 @@ const actions = {
   },
 
   // --- Asignaturas ---
-  'subj-filter': (el) => { subjFilter = el.dataset.v; render(); },
-  'subj-tab': (el) => { subjTab[el.dataset.id] = el.dataset.v; simOn = false; render(); },
-  'new-subject': (el) => openSubjectSheet(null, el?.dataset?.term),
+  'subj-filter': (el) => { subjFilter = el.dataset.v; haptic(); render(); },
+  'subj-tab': (el) => { subjTab[el.dataset.id] = el.dataset.v; simOn = false; haptic(); renderTab(); },
+  'new-subject': (el) => openWizard(el?.dataset?.term),
+  'wz-next': () => wzNext(),
+  'wz-skip': () => wzNext(true),
+  'wz-back': () => { haptic(); wz.step = Math.max(0, wz.step - 1); renderWizard(-1); },
+  'wz-form': () => {
+    const term = wz?.d.term;
+    closeOverlay();
+    openSubjectSheet(null, term);
+  },
+  'wz-set': (el) => {
+    const { k, v } = el.dataset;
+    const d = wz.d;
+    if (k === 'split') d.split = v === 'true';
+    else if (['credits', 'year', 'slotDay'].includes(k)) d[k] = +v;
+    else d[k] = v;
+    // Al pasar a anual de todo el curso, propone la evaluación tipo ADDA
+    if ((k === 'split' || k === 'term') && d.term === 'A' && !d.split) d.evalMode = String(S.PRESETS.findIndex((x) => x.annual));
+    if ((k === 'split' || k === 'term') && (d.term !== 'A' || d.split) && S.PRESETS[+d.evalMode]?.annual) d.evalMode = 'tp';
+    if (k === 'slotType') {
+      d.slotEnd = v === 'Teoría' ? addMin(d.slotStart, 90) : addMin(d.slotStart, 120);
+    }
+    haptic();
+    renderWizard();
+  },
+  'wz-add-slot': () => {
+    const d = wz.d;
+    if (!d.slotStart || !d.slotEnd || S.minutes(d.slotEnd) <= S.minutes(d.slotStart)) { haptic('heavy'); return toast('Revisa las horas'); }
+    d.slots.push({ day: d.slotDay, start: d.slotStart, end: d.slotEnd, type: d.slotType });
+    d.slotDay = Math.min(5, d.slotDay + 1);
+    haptic('success');
+    renderWizard();
+  },
+  'wz-del-slot': (el) => { wz.d.slots.splice(+el.dataset.i, 1); haptic(); renderWizard(); },
   'edit-subject': (el) => openSubjectSheet(el.dataset.id),
   'save-subject': () => {
     const d = formData();
@@ -1832,8 +2687,13 @@ const actions = {
     s.final = { grade: g, honors: !!d.honors, call: d.call };
     S.save();
     closeOverlay();
-    toast(g >= (+S.state.settings.passMark || 5) ? '¡Enhorabuena! Añadida al expediente' : 'Nota guardada');
+    const passed = g >= (+S.state.settings.passMark || 5);
+    toast(passed ? '¡Enhorabuena! Añadida al expediente' : 'Nota guardada');
     render();
+    if (passed) {
+      haptic('success');
+      confetti({ power: g >= 9 ? 1.6 : 1 });
+    }
   },
   'del-final': async (el) => {
     const s = subjectOf(el);
@@ -1888,22 +2748,169 @@ const actions = {
     toast(isNew ? 'Añadido' : 'Guardado');
     render();
   },
-  'del-item': async (el) => {
+  'del-item': (el) => {
+    closeOverlay();
+    removeItem(el.dataset.id);
+  },
+  'dup-item': (el) => {
     const it = S.item(el.dataset.id);
-    if (!(await ask(`¿Eliminar "${it.title}"?`, { ok: 'Eliminar', danger: true }))) return;
-    S.state.items = S.state.items.filter((i) => i.id !== it.id);
+    const copy = { ...it, id: S.uid(), grade: null, done: false, title: nextTitle(it.title) };
+    S.state.items.splice(S.state.items.indexOf(it) + 1, 0, copy);
     S.save();
-    toast('Eliminado');
+    haptic();
+    openItemSheet(copy.id);
+  },
+  'grade-pad': (el) => openGradePad(el.dataset.id),
+
+  // --- Estudio ---
+  'study-subj': (el) => { studySubj = el.dataset.v; studyTopic = ''; render(); },
+  'study-topic': (el) => { studyTopic = studyTopic === el.dataset.v ? '' : el.dataset.v; render(); },
+  'study-dur': (el) => { S.state.study.focus = +el.dataset.v; S.save(); render(); },
+  'study-go': (el) => {
+    St.unlockAudio();
+    const x = S.state.study;
+    if (overlay.querySelector('.done-sheet')) closeOverlay();
+    const mode = el.dataset.mode || 'focus';
+    if (el.dataset.s !== undefined) { studySubj = el.dataset.s; studyTopic = el.dataset.t || ''; }
+    if (mode === 'focus') x.next = 'focus';
+    if (x.timer) { toast('Ya tienes un bloque en marcha'); if (route().name !== 'estudio') go('#/estudio'); return; }
+    St.start({ mode, subjectId: mode === 'focus' ? studySubj : '', topicId: mode === 'focus' ? studyTopic : '' });
+    haptic('heavy');
+    if (route().name !== 'estudio') go('#/estudio'); else render();
+  },
+  'study-again': () => {
+    St.unlockAudio();
+    closeOverlay();
+    S.state.study.next = 'focus';
+    St.start({ mode: 'focus', subjectId: studySubj, topicId: studyTopic });
+    haptic('heavy');
     render();
   },
-  'toggle-done': (el) => {
-    const it = S.item(el.dataset.id);
-    it.done = !it.done;
+  'study-now': (el) => {
+    St.unlockAudio();
+    if (St.timer()) { go('#/estudio'); toast('Ya tienes un bloque en marcha'); return; }
+    studySubj = el.dataset.s;
+    studyTopic = '';
+    S.state.study.next = 'focus';
+    St.start({ mode: 'focus', subjectId: studySubj });
+    haptic('heavy');
+    go('#/estudio');
+  },
+  'study-pause': () => { St.pause(); haptic(); render(); },
+  'study-resume': () => { St.unlockAudio(); St.resume(); haptic(); render(); },
+  'study-plus': () => {
+    const t = St.timer();
+    if (!t) return;
+    t.duration += 300;
     S.save();
-    if (it.done) navigator.vibrate?.(15);
-    toast(it.done ? '¡Entregada!' : 'Marcada como pendiente');
+    haptic();
     render();
   },
+  'study-skip': () => { St.skipBreak(); haptic(); render(); },
+  'study-stop': async () => {
+    const t = St.timer();
+    if (!t) return;
+    if (t.mode === 'break') { St.skipBreak(); render(); return; }
+    const m = St.elapsedMinutes();
+    if (m < 1) { St.cancel(); render(); return; }
+    if (await ask(`¿Guardar los ${m} min que llevas?`, { ok: 'Guardar', cancel: 'Descartar' })) {
+      St.finish({ minutes: m });
+      haptic('success');
+      toast(`+${m} min guardados`);
+    } else {
+      St.cancel();
+    }
+    render();
+  },
+  'topic-conf': (el) => {
+    const t = St.topicOf(el.dataset.id, el.dataset.t);
+    if (!t) return;
+    St.setConf(t, (St.confOf(t) + 1) % 4);
+    S.save();
+    haptic(St.confOf(t) === 3 ? 'success' : 'light');
+    if (St.confOf(t) === 3) burstFrom(el, 0.3);
+    render();
+  },
+  'set-conf': (el) => {
+    const t = St.topicOf(el.dataset.id, el.dataset.t);
+    if (!t) return;
+    St.setConf(t, +el.dataset.c);
+    S.save();
+    haptic();
+    el.parentElement.querySelectorAll('.conf-opt').forEach((b) => b.classList.toggle('on', b === el));
+  },
+  'go-topics': (el) => {
+    subjTab[el.dataset.id] = 'info';
+    go(`#/asignatura/${el.dataset.id}`);
+  },
+  'study-settings': () => {
+    const x = S.state.study;
+    sheetCtx = {};
+    openSheet('Ajustes de estudio', `
+      ${field('Objetivo diario (minutos)', text('goal', x.goal, 'inputmode="numeric"'))}
+      <div class="three">
+        ${field('Estudio', text('focus', x.focus, 'inputmode="numeric"'))}
+        ${field('Descanso', text('brk', x.brk, 'inputmode="numeric"'))}
+        ${field('Descanso largo', text('longBrk', x.longBrk, 'inputmode="numeric"'))}
+      </div>
+      <p class="hint">Cada 4 bloques de estudio toca un descanso largo. Todo en minutos.</p>`, 'save-study');
+  },
+  'save-study': () => {
+    const d = formData();
+    const x = S.state.study;
+    const n = (v, def, lo, hi) => Math.min(hi, Math.max(lo, parseNum(v) ?? def));
+    x.goal = n(d.goal, 120, 10, 720);
+    x.focus = n(d.focus, 25, 5, 120);
+    x.brk = n(d.brk, 5, 1, 30);
+    x.longBrk = n(d.longBrk, 15, 5, 60);
+    S.save();
+    closeOverlay();
+    toast('Guardado');
+    render();
+  },
+  'add-session': () => {
+    sheetCtx = {};
+    const subs = [['', 'Estudio general'], ...studySubjects().map((s) => [s.id, s.name])];
+    openSheet('Añadir tiempo de estudio', `
+      ${field('Asignatura', select('subjectId', subs, studySubj))}
+      <div class="two">
+        ${field('Minutos', text('minutes', '60', 'inputmode="numeric"'))}
+        ${field('Día', `<input class="input" type="date" name="date" value="${S.ymd()}">`)}
+      </div>
+      <p class="hint">Para cuando estudias sin el temporizador (biblioteca, clases particulares…).</p>`, 'save-session');
+  },
+  'save-session': () => {
+    const d = formData();
+    const m = parseNum(d.minutes);
+    if (!m || m < 1 || m > 720) return toast('Pon los minutos (1-720)');
+    const date = d.date || S.ymd();
+    St.logSession({ subjectId: d.subjectId, minutes: m, date, start: S.toDate(date, '12:00').getTime() });
+    closeOverlay();
+    haptic('success');
+    toast(`+${m} min`);
+    render();
+  },
+  'pad-key': (el) => padKey(el.dataset.k),
+  'pad-save': () => padSave(),
+  'pad-clear': () => { pad.value = ''; padSave(); },
+  undo: () => {
+    const u = lastUndo;
+    lastUndo = null;
+    snackEl.classList.remove('show');
+    if (!u) return;
+    u();
+    haptic();
+    render();
+  },
+  'set-color': (el) => {
+    const s = subjectOf(el);
+    s.color = el.dataset.c;
+    S.save();
+    haptic();
+    closeOverlay();
+    render();
+  },
+  'toggle-done': (el) => toggleDone(el.dataset.id, el),
   'item-ics': (el) => {
     const it = S.item(el.dataset.id);
     shareFile(`${(it.title || 'evento').replace(/[^\wáéíóúñ ]+/gi, '').trim() || 'evento'}.ics`, S.toICS([it]), 'text/calendar');
@@ -1997,7 +3004,7 @@ const actions = {
   },
 
   // --- Agenda ---
-  'agenda-view': (el) => { agendaView = el.dataset.v; render(); },
+  'agenda-view': (el) => { agendaView = el.dataset.v; haptic(); renderTab(); },
   'agenda-kind': (el) => { agendaKind = el.dataset.v; render(); },
   'toggle-past': () => { showPast = !showPast; render(); },
   week: (el) => { weekOffset = +el.dataset.v === 0 ? 0 : weekOffset + +el.dataset.v; render(); },
@@ -2069,6 +3076,8 @@ document.addEventListener('click', (e) => {
   if (el.tagName !== 'A') e.preventDefault();
   if (a === 'go-week') { actions[a](el); return; }
   if (el.closest('#overlay') && ['new-item', 'new-subject', 'add-past'].includes(a) && overlay.querySelector('.qa')) closeOverlay();
+  if (el.closest('.menu') && a !== 'close' && a !== 'set-color') closeOverlay();
+  if (el.closest('#tabbar, .seg, .chip')) haptic();
   actions[a]?.(el, e);
 });
 
@@ -2085,6 +3094,21 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.dataset.wz && wz) {
+    wz.d[t.dataset.wz] = t.value;
+    if (t.dataset.wz === 'wt') {
+      t.style.setProperty('--v', `${t.value}%`);
+      overlay.querySelector('[data-wt-t]').textContent = `${t.value} %`;
+      overlay.querySelector('[data-wt-p]').textContent = `${100 - t.value} %`;
+      if (+t.value % 10 === 0) haptic();
+    }
+    if (t.dataset.wz === 'slotStart' && t.value) {
+      wz.d.slotEnd = addMin(t.value, wz.d.slotType === 'Teoría' ? 90 : 120);
+      const end = overlay.querySelector('[data-wz="slotEnd"]');
+      if (end) end.value = wz.d.slotEnd;
+    }
+    return;
+  }
   const r = route();
   if (r.name !== 'asignatura') return;
   const s = S.subject(r.id);
@@ -2164,6 +3188,20 @@ document.addEventListener('change', async (e) => {
       t.value = '';
     }
   }
+});
+
+// Intro en el asistente pasa al siguiente paso
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && wz && e.target.matches('[data-wz]:not([type="range"])')) {
+    e.preventDefault();
+    e.target.blur();
+    wzNext();
+  }
+});
+
+// Vibración al cambiar de pestaña
+document.getElementById('tabbar').addEventListener('click', (e) => {
+  if (e.target.closest('a')) haptic();
 });
 
 // Intro en un campo de nota cierra el teclado

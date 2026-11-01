@@ -39,6 +39,10 @@
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5z"/><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/></svg>
       Asignaturas
     </a>
+    <a href="#/estudio" data-tab="estudio">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2M9 2h6"/></svg>
+      Estudio
+    </a>
     <a href="#/agenda" data-tab="agenda">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>
       Agenda
@@ -49,7 +53,11 @@
     </a>
   </nav>
 
+  <!-- Temporizador de estudio en marcha -->
+  <div id="minitimer" hidden></div>
+
   <div id="overlay" hidden></div>
+  <div id="snack" role="status" aria-live="polite"></div>
   <div id="toast" role="status" aria-live="polite"></div>
 
   <script type="module" src="js/app.js"></script>

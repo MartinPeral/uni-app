@@ -121,7 +121,28 @@ const defaults = () => ({
     term: 'auto',
     theme: 'auto',
   },
+  study: studyDefaults(),
   demo: false,
+});
+
+/** Datos de estudio: sesiones, temporizador y preferencias */
+export const studyDefaults = () => ({
+  sessions: [], // { id, subjectId, topicId, date, start, minutes }
+  timer: null, // { mode, subjectId, topicId, startedAt, duration, pausedLeft }
+  next: 'focus', // lo que toca después: 'focus' | 'break'
+  cycle: 0, // bloques de estudio seguidos
+  goal: 120, // minutos al día
+  focus: 25,
+  brk: 5,
+  longBrk: 15,
+});
+
+/** Mezcla los datos guardados con los valores por defecto */
+const merge = (d, data) => ({
+  ...d,
+  ...data,
+  settings: { ...d.settings, ...data.settings },
+  study: { ...d.study, ...data.study },
 });
 
 function load() {
@@ -129,8 +150,7 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults();
     const data = JSON.parse(raw);
-    const d = defaults();
-    return { ...d, ...data, settings: { ...d.settings, ...data.settings } };
+    return merge(defaults(), data);
   } catch {
     return defaults();
   }
@@ -150,8 +170,7 @@ export function replaceState(data) {
   if (!data || data.app !== 'UniLog' || !Array.isArray(data.subjects)) {
     throw new Error('El archivo no es una copia de UniLog');
   }
-  const d = defaults();
-  state = { ...d, ...data, settings: { ...d.settings, ...data.settings } };
+  state = merge(defaults(), data);
   save();
 }
 
@@ -791,7 +810,7 @@ export function loadDemo() {
   mk(
     { name: 'Estructuras de Datos', short: 'ED', color: PALETTE[0], credits: 6, year: 2, room: 'A3.10', groupT: 'T1', groupP: 'L3', roomP: 'L2.05',
       teachers: [{ id: uid(), name: 'Prof. García', email: 'garcia@ejemplo.es', office: 'F1.45', hours: 'Martes 11:00-13:00' }],
-      topics: ['Listas y pilas', 'Árboles', 'Grafos', 'Tablas hash'].map((n, i) => ({ id: uid(), name: n, done: i < 2 })) },
+      topics: ['Listas y pilas', 'Árboles', 'Grafos', 'Tablas hash', 'Montículos'].map((n, i) => ({ id: uid(), name: n, done: i < 2, conf: [3, 2, 1, 0, 0][i] })) },
     [
       { name: 'Parciales de teoría', kind: 'examen', area: 'teoria', weight: 60, min: 4 },
       { name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 40, min: 4 },
@@ -887,6 +906,25 @@ export function loadDemo() {
       final: { grade, honors, call: 'Primera convocatoria' },
     }));
   });
+
+  // Temas de Bases de Datos y Redes
+  const byShort = (x) => state.subjects.find((s) => s.short === x);
+  byShort('BD').topics = ['Modelo relacional', 'SQL básico', 'Consultas complejas', 'Normalización', 'Transacciones']
+    .map((n, i) => ({ id: uid(), name: n, done: i < 1, conf: [2, 1, 0, 0, 0][i] }));
+  byShort('RC').topics = ['Modelo OSI y TCP/IP', 'Capa de enlace', 'Direccionamiento IP', 'Enrutamiento', 'TCP y UDP']
+    .map((n, i) => ({ id: uid(), name: n, done: i < 2, conf: [3, 2, 1, 0, 0][i] }));
+
+  // Sesiones de estudio de la última semana
+  const subs = ['ED', 'BD', 'RC', 'PA'].map(byShort).filter(Boolean);
+  for (let back = 6; back >= 1; back--) {
+    const day = new Date(t.getFullYear(), t.getMonth(), t.getDate() - back);
+    const n = [2, 1, 3, 0, 2, 1][6 - back];
+    for (let k = 0; k < n; k++) {
+      const sub = subs[(back + k) % subs.length];
+      const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 17 + k, 0);
+      state.study.sessions.push({ id: uid(), subjectId: sub.id, topicId: '', date: ymd(day), start: start.getTime(), minutes: 25 });
+    }
+  }
 
   state.demo = true;
   save();

@@ -2,6 +2,14 @@
 
 App web instalable (PWA) para organizar la universidad: asignaturas, horario, exámenes, prácticas, entregas, métodos de evaluación y notas. Funciona sin conexión y los datos se guardan en el propio móvil.
 
+## Novedades de la versión 2.0
+
+- **Gestos:** desliza una fecha a la derecha para marcarla entregada o ponerle nota, y a la izquierda para borrarla (con *Deshacer*). Mantén pulsada una asignatura o una fecha para ver su menú. Desliza el horario semanal o el calendario para cambiar de semana o de mes.
+- **Teclado de notas:** al poner una nota ves al momento cómo quedaría la asignatura.
+- **Asistente paso a paso** para crear asignaturas: nombre, créditos, cuatrimestre o anual, grupos, clases y evaluación (incluida la de tipo ADDA).
+- **Pestaña Estudio:** temporizador pomodoro por asignatura y tema, objetivo diario y racha, plan de qué estudiar hoy según los exámenes y cómo llevas cada tema, gráfica de la semana y registro de sesiones.
+- Animaciones, vibración (en iPhone con iOS 18 o posterior) y confeti al aprobar.
+
 ## Qué hace
 
 - **Hoy:** la clase en la que estás (o la siguiente), las clases del día, cuenta atrás de los próximos exámenes, entregas pendientes y cómo vas en cada asignatura.
@@ -24,7 +32,9 @@ uni-app/
 ├── css/styles.css        Estilos (tema claro y oscuro)
 ├── js/
 │   ├── app.js            Pantallas, navegación y botones
-│   └── store.js          Datos y cálculos (notas, expediente, horario, .ics)
+│   ├── store.js          Datos y cálculos (notas, expediente, horario, .ics)
+│   ├── study.js          Estudio: pomodoro, sesiones y plan del día
+│   └── fx.js             Gestos, vibración, animaciones y confeti
 └── icons/                Iconos de la app
 ```
 
@@ -48,7 +58,7 @@ Abre la carpeta en VS Code, clic derecho en `index.html` → **Open with Live Se
 
 ## Actualizarla
 
-Sube los cambios y cambia `CACHE = 'unilog-v1'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
+Sube los cambios y cambia `CACHE = 'unilog-v6'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
 
 ## Copias de seguridad
 
