@@ -5,7 +5,7 @@
 //  Cuando cambies archivos, sube el número de versión.
 // =============================================================
 
-const CACHE = 'unilog-v9';
+const CACHE = 'unilog-v10';
 const ASSETS = [
   './',
   './index.html',
@@ -38,7 +38,8 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
 
   e.respondWith(
-    fetch(req)
+    // no-cache: pregunta siempre al servidor si hay versión nueva
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

@@ -6,7 +6,7 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -3348,5 +3348,21 @@ applyTheme();
 render();
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  // Cuando hay una versión nueva, se recarga sola una vez
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        reg.update();
+        // Busca actualizaciones al volver a la app
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update(); });
+      })
+      .catch(() => {});
+  });
 }
