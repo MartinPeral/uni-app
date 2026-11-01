@@ -6,7 +6,7 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -272,7 +272,7 @@ function ring(c, { size = 120, stroke = 10, color = 'var(--accent)' } = {}) {
 /** Barra apilada con los apartados de evaluación */
 function compBar(c, s) {
   if (!c.parts.length) return '';
-  return `<div class="cbar" style="--c:${subjColor(s)}">${c.parts.filter((p) => !p.optional).map((p) => `
+  return `<div class="cbar" style="--c:${subjColor(s)}">${c.parts.filter((p) => !p.optional && !p.req).map((p) => `
     <span style="flex:${Math.max(p.weight, 0.001)}" title="${esc(p.comp.name)}">
       <i style="width:${p.avg == null ? 0 : (p.avg / 10) * p.share * 100}%"></i>
     </span>`).join('')}</div>`;
@@ -287,7 +287,11 @@ function statusInfo(s, c) {
     case 'start': return { tone: 'muted', title: 'Aún sin notas', text: `Necesitas una media de ${fmt(pass)} para aprobar.` };
     case 'ontrack': return { tone: 'ok', title: `Necesitas un ${fmt(c.need)}`, text: `de media en lo que queda (${pending} de la nota).` };
     case 'hard': return { tone: 'warn', title: `Necesitas un ${fmt(c.need)}`, text: `de media en lo que queda (${pending}). Toca apretar.` };
-    case 'secured': return { tone: 'good', title: 'Aprobado asegurado', text: c.minsPending.length ? 'Te falta llegar a las notas mínimas que quedan.' : 'Aunque saques un 0 en lo que queda.' };
+    case 'secured': return { tone: 'good', title: c.reqPending.length ? 'Nota asegurada' : 'Aprobado asegurado', text: c.reqPending.length ? `Solo te falta superar ${c.reqPending.map((p) => p.comp.name).join(' y ')}.` : c.minsPending.length ? 'Te falta llegar a las notas mínimas que quedan.' : 'Aunque saques un 0 en lo que queda.' };
+    case 'reqpending': {
+      const r = c.reqPending[0];
+      return { tone: 'warn', title: `Te falta ${r.comp.name}`, text: `Con ${fmt(c.points)} aprobarías, pero antes tienes que sacar al menos un ${fmt(r.min)}${r.avg != null ? ` (llevas ${fmt(r.avg)})` : ''}.` };
+    }
     case 'impossible': return { tone: 'bad', title: 'No llegas por continua', text: `Necesitarías un ${fmt(c.need)} en lo que queda. Prepara la siguiente convocatoria.` };
     case 'passed': return { tone: 'good', title: s.final ? `Aprobada con ${fmt(s.final.grade)}` : `Aprobada con ${fmt(c.points)}`, text: s.final ? S.gradeLabel(+s.final.grade, s.final.honors) : 'Ya tienes todas las notas. Pon la nota del acta cuando salga.' };
     case 'retake': {
@@ -768,6 +772,7 @@ function evalTab(s) {
           <span class="comp-avg" data-comp-avg="${p.comp.id}">${gradeBadge(p.avg)}</span>
         </div>
         ${p.optional && p.target ? `<p class="bonus ${p.bonus > 0 ? 'on' : ''}" data-comp-bonus="${p.comp.id}">${bonusText(p)}</p>` : ''}
+        ${p.req && p.min != null ? `<p class="bonus ${p.avg != null && p.avg >= p.min ? 'on' : p.failsMin ? 'bad' : ''}">${reqText(p)}</p>` : ''}
         ${p.items.length ? compItems(p, sim) : '<p class="muted small">Sin evaluables. Añade el examen o las prácticas de este apartado.</p>'}
         <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${p.comp.id}" data-k="${p.comp.kind || 'examen'}">${I.plusSm} Añadir ${addLabel(p.comp)}</button>
       </div>`).join('')}
@@ -860,13 +865,21 @@ function compRules(p, c) {
   const x = p.comp;
   const target = x.replaces && c.parts.find((q) => q.comp.id === x.replaces);
   const bits = [
-    p.optional ? `puede sustituir ${fmt(x.weight)} % de ${esc(target?.comp.name || '—')}` : `${fmt(x.weight)} %`,
+    p.optional ? `puede sustituir ${fmt(x.weight)} % de ${esc(target?.comp.name || '—')}` : x.req ? 'requisito, no cuenta en la nota' : `${fmt(x.weight)} %`,
     x.agg === 'best' ? `media del ${fmt(x.bestPct || 80)} % mejores` : '',
+    x.agg === 'max' ? 'vale el mejor intento' : '',
     p.byPeriod ? 'media de los dos cuatris' : '',
     p.byPeriod && x.periodMin != null && x.periodMin !== '' ? `mín. ${fmt(x.periodMin)} en cada cuatri` : '',
-    p.min != null ? `mín. ${fmt(p.min)}${p.byPeriod ? ' de media' : ''}` : '',
+    p.min != null ? `${x.req ? 'hay que sacar' : 'mín.'} ${fmt(p.min)}${p.byPeriod ? ' de media' : ''}` : '',
   ].filter(Boolean);
   return bits.join(' · ') + ' ·';
+}
+
+function reqText(p) {
+  if (p.avg != null && p.avg >= p.min) return `Superado con un ${fmt(p.avg)}.`;
+  if (p.failsMin) return `No llegas al ${fmt(p.min)}: sin esto no apruebas la asignatura.`;
+  if (p.avg != null) return `Llevas un ${fmt(p.avg)}. Te queda otro intento para llegar al ${fmt(p.min)}.`;
+  return `Tienes que sacar al menos un ${fmt(p.min)} para aprobar la asignatura.`;
 }
 
 function bonusText(p) {
@@ -2227,12 +2240,13 @@ function openCompSheet(subjectId, compId, period = 'C1') {
       ${field('Nota mínima', text('min', c.min == null ? '' : fmt(c.min), 'inputmode="decimal" placeholder="Sin mínimo"'))}
     </div>
     <div class="sub-card adv">
-      <div class="field"><span>Cómo se calcula su nota</span>${segPick('agg', [['media', 'Media de todas'], ['best', 'Media de las mejores']], c.agg || 'media')}</div>
+      <div class="field"><span>Cómo se calcula su nota</span>${segPick('agg', [['media', 'Media'], ['best', 'Las mejores'], ['max', 'Solo la mejor']], c.agg || 'media')}</div>
       <div class="only-best" ${c.agg === 'best' ? '' : 'hidden'}>${field('Porcentaje de las mejores que cuentan', text('bestPct', fmt(c.bestPct || 80), 'inputmode="decimal"'))}
         <p class="hint">Ej.: 80 % de 5 cuestionarios = cuentan los 4 mejores.</p></div>
       ${s.term === 'A' && !split ? `
       <label class="check"><input type="checkbox" name="byPeriod" ${c.byPeriod ? 'checked' : ''}><span>Nota en cada cuatrimestre y luego media de los dos</span></label>
       ${field('Mínimo en cada cuatrimestre', text('periodMin', c.periodMin == null || c.periodMin === '' ? '' : fmt(c.periodMin), 'inputmode="decimal" placeholder="Sin mínimo"'))}` : ''}
+      <label class="check"><input type="checkbox" name="req" ${c.req ? 'checked' : ''}><span>Requisito: no cuenta en la nota, solo hay que llegar al mínimo</span></label>
       <label class="check"><input type="checkbox" name="optional" ${c.optional ? 'checked' : ''}><span>Opcional: solo cuenta si te sube la nota</span></label>
       <div class="only-opt" ${c.optional ? '' : 'hidden'}>
         ${field('Sustituye parte de', select('replaces', s.comps.filter((x) => x.id !== compId && !x.optional).map((x) => [x.id, x.name]), c.replaces))}
@@ -2743,9 +2757,11 @@ const actions = {
     const s = S.subject(sheetCtx.subjectId);
     if (!d.name.trim()) return toast('Ponle un nombre');
     const w = parseNum(d.weight);
-    if (w == null || w < 0 || w > 100) return toast('El peso va de 0 a 100');
+    if (!d.req && (w == null || w < 0 || w > 100)) return toast('El peso va de 0 a 100');
     const min = parseNum(d.min);
+    if (d.req && min == null) return toast('Pon la nota mínima del requisito');
     const data = {
+      req: !!d.req,
       agg: d.agg,
       bestPct: parseNum(d.bestPct) || 80,
       byPeriod: !!d.byPeriod,
@@ -2753,6 +2769,7 @@ const actions = {
       optional: !!d.optional && !!d.replaces,
       replaces: d.optional ? d.replaces : '',
       name: d.name.trim(), kind: d.kind, area: d.area, period: d.period || '', weight: w, min: min == null ? null : Math.min(10, Math.max(0, min)) };
+    if (data.req) { data.weight = 0; data.optional = false; data.replaces = ''; }
     if (sheetCtx.compId) Object.assign(s.comps.find((c) => c.id === sheetCtx.compId), data);
     else s.comps.push({ id: S.uid(), ...data });
     S.save();

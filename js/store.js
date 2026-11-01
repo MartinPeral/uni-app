@@ -339,7 +339,10 @@ function aggregate(its, c, sim) {
   const share = graded.reduce((a, x) => a + wt(x.i), 0) / iw;
   if (!graded.length) return { avg: null, share: 0 };
   let use = graded;
-  if (c.agg === 'best') {
+  if (c.agg === 'max') {
+    // Varios intentos: cuenta el mejor
+    use = [[...graded].sort((a, b) => b.g - a.g)[0]];
+  } else if (c.agg === 'best') {
     const pct = Math.min(100, Math.max(1, +c.bestPct || 80)) / 100;
     const k = Math.max(1, Math.round(graded.length * pct));
     use = [...graded].sort((a, b) => b.g - a.g).slice(0, k);
@@ -356,7 +359,7 @@ function summarize(parts, weight = null, min = null) {
   let mins = null;
   for (const p of parts) {
     w += p.weight;
-    if (p.min != null) mins = mins == null ? p.min : Math.max(mins, p.min);
+    if (p.min != null && !p.comp.req) mins = mins == null ? p.min : Math.max(mins, p.min);
     if (p.avg != null) {
       num += p.avg * p.weight * p.share;
       den += p.weight * p.share;
@@ -470,6 +473,7 @@ export function calc(s, sim = null) {
       min,
       belowMin: min != null && avg != null && avg < min,
       failsMin: min != null && avg != null && complete && avg < min,
+      req: !!c.req,
     };
   });
 
@@ -510,6 +514,9 @@ export function calc(s, sim = null) {
     ...periods.filter((p) => p.belowMin && !p.failsMin).map((p) => ({ name: PERIODS[p.period], avg: p.avg, min: p.min })),
   ];
 
+  // Requisitos (como un test con mínimo) que aún no están superados
+  const reqPending = parts.filter((p) => p.req && p.min != null && !(p.avg != null && p.avg >= p.min) && !p.failsMin);
+
   let need = null; // media necesaria en lo que queda para aprobar
   let status;
   if (s.final) {
@@ -520,7 +527,7 @@ export function calc(s, sim = null) {
     status = 'start';
     need = pass;
   } else if (pendingW < 1e-6) {
-    status = points >= pass && !failsMin && !itemFails.length ? 'passed' : 'failed';
+    status = points < pass || failsMin || itemFails.length ? 'failed' : reqPending.length ? 'reqpending' : 'passed';
   } else {
     need = (pass - points) / pendingW;
     if (failsMin) status = 'failed';
@@ -560,6 +567,7 @@ export function calc(s, sim = null) {
     minsPending,
     areas: byAreas(parts),
     cuatris,
+    reqPending,
     simulated,
     final: s.final ? +s.final.grade : pendingW < 1e-6 && comps.length ? points : null,
   };
@@ -794,6 +802,21 @@ export const PRESETS = [
     ],
   },
   {
+    name: 'Teoría + prácticas con test mínimo',
+    desc: 'Como SPD: teoría 65 % (mín. 4) y prácticas 35 %, más un test de teoría básica con mínimo 7 que no cuenta en la nota (2 intentos, vale el mejor)',
+    comps: [
+      { key: 't', name: 'Teoría y problemas', kind: 'examen', area: 'teoria', weight: 65, min: 4 },
+      { key: 'p', name: 'Prácticas', kind: 'practica', area: 'practicas', weight: 35, min: null },
+      { key: 'test', name: 'Test de teoría básica', kind: 'examen', area: 'teoria', weight: 0, min: 7, req: true, agg: 'max' },
+    ],
+    items: [
+      ['t', 'examen', 'Prueba escrita de teoría y problemas'],
+      ['test', 'examen', 'Test de teoría básica (1.er intento)'],
+      ['test', 'examen', 'Test de teoría básica (2.º intento)'],
+    ],
+    notes: 'Asistencia obligatoria a laboratorio y seminarios, y presentación de trabajos. Se pueden recuperar hasta dos prácticas en sesiones posteriores. Para aprobar hay que sacar más de 5 en la media ponderada. Si apruebas, puedes presentarte a la 1.ª convocatoria para subir nota.',
+  },
+  {
     name: 'Proyecto',
     comps: [
       { name: 'Examen', kind: 'examen', area: 'teoria', weight: 50, min: 4 },
@@ -836,7 +859,19 @@ export function applyPreset(s, preset) {
     return;
   }
 
-  const make = (period) => preset.comps.map((c) => ({ id: uid(), ...c, period }));
+  if (preset.notes && !s.notes) s.notes = preset.notes;
+
+  // Plantilla con sus propias pruebas (como SPD)
+  if (preset.items && !isSplit(s)) {
+    const ids = {};
+    s.comps = preset.comps.map(({ key, ...c }) => (ids[key] = { id: uid(), ...c }));
+    for (const [key, kind, title] of preset.items) {
+      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title }));
+    }
+    return;
+  }
+
+  const make = (period) => preset.comps.map(({ key, ...c }) => ({ id: uid(), ...c, period }));
   s.comps = isSplit(s) ? [...make('C1'), ...make('C2')] : make('');
   // Crea los evaluables básicos de cada apartado
   for (const c of s.comps) {
