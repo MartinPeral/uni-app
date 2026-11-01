@@ -6,7 +6,7 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -172,18 +172,24 @@ function render() {
     const a = DEPTH[r.name] || 0;
     const b = DEPTH[prev] || 0;
     const dir = !prev ? 'fade' : a > b ? 'fwd' : a < b ? 'back' : 'fade';
-    app.classList.remove('enter-fwd', 'enter-back', 'enter-fade');
-    void app.offsetWidth;
-    app.classList.add(`enter-${dir}`);
-    app.querySelectorAll('.stack > *, .glance > *, .exam-scroll > *, .stats > *, .plan > *').forEach((el, i) =>
-      el.style.setProperty('--i', Math.min(i % 12, 10)));
-    clearTimeout(enterTimer);
-    enterTimer = setTimeout(() => app.classList.remove('enter-fwd', 'enter-back', 'enter-fade'), 800);
-    countUp(app);
+    // Mientras se ve la animación de apertura, la entrada se reserva para después
+    if (!document.getElementById('splash')) playEnter(dir);
   }
   lastRouteKey = key;
   afterRender(r);
   tickStudy();
+}
+
+/** Anima la entrada del contenido de la pantalla */
+function playEnter(dir = 'fade') {
+  app.classList.remove('enter-fwd', 'enter-back', 'enter-fade');
+  void app.offsetWidth;
+  app.classList.add(`enter-${dir}`);
+  app.querySelectorAll('.stack > *, .glance > *, .exam-scroll > *, .stats > *, .plan > *').forEach((el, i) =>
+    el.style.setProperty('--i', Math.min(i % 12, 10)));
+  clearTimeout(enterTimer);
+  enterTimer = setTimeout(() => app.classList.remove('enter-fwd', 'enter-back', 'enter-fade'), 800);
+  countUp(app);
 }
 
 /** Redibuja con un fundido suave del contenido de la pestaña */
@@ -3346,6 +3352,23 @@ setInterval(() => {
 
 applyTheme();
 render();
+
+// ---------- Animación de apertura ----------
+
+(function splashOut() {
+  const el = document.getElementById('splash');
+  if (!el) return;
+  const quick = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const greet = el.querySelector('.sp-greet');
+  const name = S.state.settings.name;
+  if (greet) greet.textContent = `${greeting()}${name ? `, ${name}` : ''}`;
+  setTimeout(() => {
+    el.classList.add('out');
+    document.body.classList.remove('splashing');
+    playEnter('fade');
+    setTimeout(() => el.remove(), 550);
+  }, quick ? 250 : 1500);
+})();
 
 if ('serviceWorker' in navigator) {
   // Cuando hay una versión nueva, se recarga sola una vez

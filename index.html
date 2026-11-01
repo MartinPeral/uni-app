@@ -26,7 +26,23 @@
 
   <link rel="stylesheet" href="css/styles.css">
 </head>
-<body>
+<body class="splashing">
+  <!-- Animación de apertura -->
+  <div id="splash" aria-hidden="true">
+    <div class="sp-logo">
+      <svg class="sp-cap" viewBox="0 0 100 100" width="76" height="76" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path class="sp-top" d="M8 38 L50 20 L92 38 L50 56 Z" fill="#7c9cff"/>
+        <path class="sp-base" d="M28 47 V63 C28 70 38 75 50 75 C62 75 72 70 72 63 V47 L50 56 Z" fill="#607ce6"/>
+        <g class="sp-tassel"><path d="M84 41 V62" stroke="#ffcc4d" stroke-width="4"/><circle cx="84" cy="66" r="5" fill="#ffcc4d"/></g>
+      </svg>
+      <svg class="sp-check" viewBox="0 0 100 40" width="56" height="22" fill="none">
+        <path d="M30 18 L44 30 L70 8" stroke="#3ddc97" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <div class="sp-name">Uni<b>Log</b></div>
+    <div class="sp-greet"></div>
+  </div>
+
   <main id="app"></main>
 
   <!-- Barra inferior de pestañas -->

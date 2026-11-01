@@ -5,7 +5,7 @@
 //  Cuando cambies archivos, sube el número de versión.
 // =============================================================
 
-const CACHE = 'unilog-v10';
+const CACHE = 'unilog-v11';
 const ASSETS = [
   './',
   './index.html',
