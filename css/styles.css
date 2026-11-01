@@ -1144,3 +1144,23 @@ button.conf:active { transform: scale(.88); }
 body.has-timer .fab { bottom: calc(var(--safe-bottom) + 134px); }
 body.has-timer #app { padding-bottom: calc(var(--safe-bottom) + 170px); }
 body.no-tabs #minitimer { bottom: calc(var(--safe-bottom) + 12px); }
+
+/* ---------- Anuales: cada cuatrimestre por separado ---------- */
+
+.cuatri-seg { margin-bottom: 14px; }
+.cuatri-seg em { font-style: normal; font-weight: 800; font-size: 13px; opacity: 1; }
+.cuatri-seg em.t-bad { color: var(--bad); } .cuatri-seg em.t-ok { color: var(--ok); }
+.cuatri-seg em.t-good { color: var(--good); } .cuatri-seg em.t-top { color: var(--top); }
+.cuatri-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; position: relative; overflow: hidden; }
+.cuatri-head::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+.ch-main { display: flex; flex-direction: column; min-width: 0; }
+.ch-main strong { font-size: 40px; font-weight: 800; letter-spacing: -.03em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ch-main small { color: var(--muted); font-size: 13px; }
+.ch-areas { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.ch-areas span { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ch-areas b { color: var(--a); font-weight: 700; }
+.ch-areas .gbadge { min-width: 44px; height: 28px; font-size: 14px; }
+button.area-tile { text-align: left; width: 100%; }
+.cuatri-tiles { margin-top: 10px; }
+.area-tile.sel { border-color: var(--accent); }
+.bonus.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); font-weight: 600; }

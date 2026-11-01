@@ -487,6 +487,11 @@ export function calc(s, sim = null) {
   }
   points += bonus;
 
+  // Anual evaluada en todo el curso: nota orientativa de cada cuatrimestre
+  const cuatris = s.term === 'A' && !split && comps.length
+    ? ['C1', 'C2'].map((k) => termBreakdown(k, parts, totalW, sim))
+    : [];
+
   // Nota de cada cuatrimestre (anuales)
   const periods = split
     ? ['C1', 'C2'].map((k) => {
@@ -554,8 +559,65 @@ export function calc(s, sim = null) {
     atRiskMin,
     minsPending,
     areas: byAreas(parts),
+    cuatris,
     simulated,
     final: s.final ? +s.final.grade : pendingW < 1e-6 && comps.length ? points : null,
+  };
+}
+
+/**
+ * Nota de un cuatrimestre en una anual evaluada en todo el curso:
+ * cada apartado con solo las pruebas de ese cuatri, con los mismos pesos.
+ */
+function termBreakdown(k, parts, totalW, sim) {
+  const rows = parts.map((p) => {
+    const its = p.items.filter((i) => itemPeriod(i) === k);
+    const g = p.byPeriod ? p.byPeriod.find((x) => x.period === k) : aggregate(its, p.comp, sim);
+    const min = p.byPeriod ? numOrNull(p.comp.periodMin) : null;
+    return {
+      comp: p.comp,
+      part: p,
+      items: its,
+      avg: g.avg,
+      share: g.share,
+      min,
+      low: min != null && g.avg != null && g.avg < min,
+      optional: p.optional,
+    };
+  });
+  let num = 0;
+  let den = 0;
+  let all = 0;
+  for (const r of rows) {
+    if (r.optional) continue;
+    const w = r.part.weight;
+    all += w;
+    if (r.avg == null) continue;
+    num += r.avg * r.share * w;
+    den += r.share * w;
+  }
+  // Opcionales: suman si mejoran el apartado al que sustituyen en este cuatri
+  let bonus = 0;
+  for (const r of rows) {
+    if (!r.optional || r.avg == null) continue;
+    const t = rows.find((x) => x.comp.id === r.comp.replaces);
+    if (!t || t.avg == null) continue;
+    const wO = totalW ? (+r.comp.weight || 0) / totalW : 0;
+    r.bonus = Math.max(0, r.avg - t.avg) * wO * Math.min(r.share, t.share);
+    bonus += r.bonus;
+  }
+  return {
+    period: k,
+    rows,
+    grade: den ? (num + bonus) / den : null,
+    done: all ? den / all : 0,
+    bonus,
+    areas: AREA_ORDER.map((a) => {
+      const rs = rows.filter((r) => !r.optional && areaOf(r.comp) === a && r.avg != null);
+      const d = rs.reduce((x, r) => x + r.share * r.part.weight, 0);
+      return { area: a, avg: d ? rs.reduce((x, r) => x + r.avg * r.share * r.part.weight, 0) / d : null, any: rows.some((r) => !r.optional && areaOf(r.comp) === a) };
+    }).filter((x) => x.any),
+    low: rows.some((r) => r.low),
   };
 }
 

@@ -6,7 +6,7 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -549,6 +549,10 @@ function subjectCard(s) {
 
 /** Resumen corto: Teoría 6,4 · Prácticas 8,5 */
 function areaMini(c) {
+  if (c.cuatris?.length) {
+    return `<div class="area-mini">${c.cuatris.map((q) =>
+      `<span class="period"><b>${S.PERIOD_SHORT[q.period]}</b> ${q.grade == null ? '—' : fmt(q.grade)}</span>`).join('')}</div>`;
+  }
   if (c.split) {
     return `<div class="area-mini">${c.periods.map((p) =>
       `<span class="period"><b>${S.PERIOD_SHORT[p.period]}</b> ${p.avg == null ? '—' : fmt(p.avg)}</span>`).join('')}</div>`;
@@ -650,7 +654,7 @@ function heroHTML(s) {
         </div>`}
       </div>
     </div>
-    ${s.final ? '' : c.split ? periodTiles(c) : areaTiles(c)}
+    ${s.final ? '' : c.split ? periodTiles(c) : c.cuatris.length ? cuatriTiles(s, c) : areaTiles(c)}
     </div>`;
 }
 
@@ -668,6 +672,19 @@ function periodTiles(c) {
           ${tp.length > 1 ? `<small class="tp-line">${tp.map((a) => `<span class="${a.area}"><b>${S.AREAS[a.area].short}</b> ${fmt(a.avg)}</span>`).join('')}</small>` : ''}
         </div>`;
     }).join('')}</div>`;
+}
+
+/** Anual de todo el curso: teoría y prácticas, y la nota de cada cuatri */
+function cuatriTiles(s, c) {
+  return `${areaTiles(c)}
+    <div class="areas cuatri-tiles">${c.cuatris.map((q) => `
+      <button class="area-tile period ${cuatriOf(s) === q.period ? 'sel' : ''}" data-action="eval-period" data-id="${s.id}" data-v="${q.period}">
+        <span class="area-name">${S.PERIOD_SHORT[q.period]}</span>
+        <strong class="t-${S.gradeTone(q.grade)}">${fmt(q.grade)}</strong>
+        <small class="tp-line">${q.areas.filter((x) => x.area !== 'otro').map((x) =>
+          `<span class="${x.area}"><b>${S.AREAS[x.area].short}</b> ${fmt(x.avg)}</span>`).join('')}${q.low ? ' <span class="text-bad">bajo mínimo</span>' : ''}</small>
+      </button>`).join('')}
+    </div>`;
 }
 
 /** Notas de teoría y prácticas por separado */
@@ -729,6 +746,8 @@ function evalTab(s) {
       <label class="switch"><input type="checkbox" data-field="sim" ${simOn ? 'checked' : ''}><span></span></label>
     </div>
 
+    ${c.cuatris.length ? cuatriSeg(s, c) : ''}
+    ${c.cuatris.length && cuatriOf(s) !== 'all' ? cuatriView(s, c, sim) : `
     ${compBar(c, s)}
 
     ${(c.split ? c.periods : [{ period: '', areas: c.areas }]).map((pr) => `
@@ -754,7 +773,7 @@ function evalTab(s) {
       </div>`).join('')}
     </div>`).join('')}
     ${pr.period ? `<button class="add-term mt" data-action="new-comp" data-id="${s.id}" data-p="${pr.period}">${I.plusSm} Añadir apartado al ${S.PERIOD_SHORT[pr.period]}</button>` : ''}
-    `).join('')}
+    `).join('')}`}
 
     ${c.split ? '' : `<button class="btn ghost block mt" data-action="new-comp" data-id="${s.id}">${I.plusSm} Añadir apartado de evaluación</button>`}
     <button class="btn text block" data-action="presets" data-id="${s.id}">Cambiar a otra plantilla de evaluación</button>
@@ -772,6 +791,68 @@ function evalTab(s) {
       </div>` : `
       <button class="btn block ${c.pendingW < 1e-6 && c.parts.length ? 'primary' : ''}" data-action="final" data-id="${s.id}">Poner nota del acta</button>
       <p class="hint">Cuando tengas la nota oficial, ponla aquí. La asignatura pasa a tu expediente.</p>`}`;
+}
+
+// --- Anuales de todo el curso: ver cada cuatrimestre por separado ---
+
+const evalPeriod = {}; // cuatrimestre elegido por asignatura
+
+function cuatriOf(s) {
+  if (!evalPeriod[s.id]) evalPeriod[s.id] = S.currentTermAuto();
+  return evalPeriod[s.id];
+}
+
+function cuatriSeg(s, c) {
+  const cur = cuatriOf(s);
+  const g = (k) => c.cuatris.find((x) => x.period === k)?.grade;
+  return `
+    <div class="seg cuatri-seg">
+      ${['C1', 'C2'].map((k) => `
+        <button class="${cur === k ? 'on' : ''}" data-action="eval-period" data-id="${s.id}" data-v="${k}">
+          ${S.PERIOD_SHORT[k]} <em class="t-${S.gradeTone(g(k))}">${g(k) == null ? '' : fmt(g(k))}</em>
+        </button>`).join('')}
+      <button class="${cur === 'all' ? 'on' : ''}" data-action="eval-period" data-id="${s.id}" data-v="all">Curso</button>
+    </div>`;
+}
+
+/** Un cuatrimestre: sus pruebas de cada apartado y su nota orientativa */
+function cuatriView(s, c, sim) {
+  const k = cuatriOf(s);
+  const q = c.cuatris.find((x) => x.period === k);
+  const other = c.cuatris.find((x) => x.period !== k);
+  const byArea = S.AREA_ORDER.map((a) => ({ a, rows: q.rows.filter((r) => S.areaOf(r.comp) === a) })).filter((x) => x.rows.length);
+  return `
+    <div class="card cuatri-head" style="--c:${subjColor(s)}">
+      <div class="ch-main">
+        <span class="m-label">${S.PERIODS[k]}</span>
+        <strong class="t-${S.gradeTone(q.grade)}" data-cuatri-grade>${fmt(q.grade)}</strong>
+        <small>${q.grade == null ? 'Aún sin notas en este cuatri' : `${pct(q.done)} evaluado${q.bonus > 0 ? ` · +${fmt(q.bonus)} por opcionales` : ''}`}</small>
+      </div>
+      <div class="ch-areas">${q.areas.map((x) => `
+        <span class="${x.area}"><b>${S.AREAS[x.area].label}</b>${gradeBadge(x.avg)}</span>`).join('')}
+      </div>
+    </div>
+    <p class="hint">Nota orientativa del cuatri con los mismos pesos. La final sale de juntar los dos${other?.grade != null ? ` (el ${S.PERIOD_SHORT[other.period]} va con ${fmt(other.grade)})` : ''}.</p>
+
+    ${byArea.map(({ a, rows }) => `
+      <h2 class="section-title area-head ${a}">${S.AREAS[a].label}</h2>
+      <div class="stack">${rows.map((r) => `
+        <div class="card comp">
+          <div class="comp-head">
+            <button class="comp-title" data-action="edit-comp" data-id="${s.id}" data-c="${r.comp.id}">
+              <strong>${esc(r.comp.name)}${r.optional ? ' <em class="opt">Opcional</em>' : ''}</strong>
+              <small>${r.optional ? 'solo cuenta si te sube la nota' : `${fmt(r.comp.weight)} % de la nota`}${r.min != null ? ` · mín. ${fmt(r.min)} en el cuatri` : ''}${r.comp.agg === 'best' ? ` · media del ${fmt(r.comp.bestPct || 80)} % mejores` : ''} · ${I.edit}</small>
+            </button>
+            <span class="comp-avg ${r.low ? 'low' : ''}" data-cp-avg="${r.comp.id}-${k}">${gradeBadge(r.avg)}</span>
+          </div>
+          ${r.low ? `<p class="bonus bad">Por debajo del mínimo de ${fmt(r.min)} en este cuatri.</p>` : ''}
+          ${r.optional && r.bonus > 0 ? `<p class="bonus on">Te suma ${fmt(r.bonus)} puntos este cuatri.</p>` : ''}
+          ${r.items.length
+            ? `<div class="comp-items">${r.items.sort(S.byDate).map((it) => gradeRow(it, sim, r.items.length)).join('')}</div>`
+            : `<p class="muted small">Nada en el ${S.PERIOD_SHORT[k]} todavía.</p>`}
+          <button class="btn sm ghost mt" data-action="new-item" data-s="${s.id}" data-c="${r.comp.id}" data-k="${r.comp.kind || 'examen'}" data-p="${k}">${I.plusSm} Añadir ${addLabel(r.comp)} al ${S.PERIOD_SHORT[k]}</button>
+        </div>`).join('')}
+      </div>`).join('')}`;
 }
 
 /** Reglas de un apartado en una línea: peso, mínimos, cómo se calcula */
@@ -977,6 +1058,15 @@ function refreshLive(s) {
   for (const p of c.periods) {
     const el = app.querySelector(`[data-period-avg="${p.period}"]`);
     if (el) el.innerHTML = gradeBadge(p.avg, { size: 'lg' });
+  }
+  const cg = app.querySelector('[data-cuatri-grade]');
+  if (cg) {
+    const q = c.cuatris.find((x) => x.period === cuatriOf(s));
+    if (q) { cg.textContent = fmt(q.grade); cg.className = `t-${S.gradeTone(q.grade)}`; }
+  }
+  for (const q of c.cuatris) for (const r of q.rows) {
+    const el = app.querySelector(`[data-cp-avg="${r.comp.id}-${q.period}"]`);
+    if (el && el.closest('.cuatri-head, .comp')) el.innerHTML = gradeBadge(r.avg);
   }
   const bar = app.querySelector('.tab-body .cbar');
   if (bar) bar.outerHTML = compBar(c, s);
@@ -2709,6 +2799,7 @@ const actions = {
     if (el.dataset.s) preset.subjectId = el.dataset.s;
     if (el.dataset.c) preset.compId = el.dataset.c;
     if (el.dataset.d) preset.date = el.dataset.d;
+    if (el.dataset.p) preset.period = el.dataset.p;
     if (!S.state.subjects.some((s) => !s.final)) {
       closeOverlay();
       toast('Primero añade una asignatura');
@@ -2761,6 +2852,7 @@ const actions = {
     openItemSheet(copy.id);
   },
   'grade-pad': (el) => openGradePad(el.dataset.id),
+  'eval-period': (el) => { evalPeriod[el.dataset.id] = el.dataset.v; renderTab(); },
 
   // --- Estudio ---
   'study-subj': (el) => { studySubj = el.dataset.v; studyTopic = ''; render(); },
