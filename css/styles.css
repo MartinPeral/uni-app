@@ -1349,3 +1349,46 @@ body.no-tabs .composer { bottom: 0; padding-bottom: calc(var(--safe-bottom) + 10
 .ai-plan-row span { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
 .ai-plan-row b { font-weight: 650; }
 .ai-plan-row em { font-style: normal; font-size: 12px; font-weight: 700; color: var(--c); }
+
+/* ---------- Plan de estudio y temarios ---------- */
+
+.lead { color: var(--muted); font-size: 15px; line-height: 1.45; margin: 2px 0 6px; }
+.sp-cta { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-top: 14px; }
+.sp-cta > svg { color: var(--muted); }
+.sp-cta .coach-ico { background: linear-gradient(135deg, var(--good), var(--accent)); }
+.sp-sub { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.sp-sub:last-child { border-bottom: 0; }
+.sp-sub .row-text strong { white-space: normal; }
+.sp-exam { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 14px; position: relative; overflow: hidden; }
+.sp-exam::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--c); }
+.sp-ex-head { display: flex; align-items: center; gap: 12px; }
+.sp-ex-head .row-text strong { white-space: normal; line-height: 1.25; }
+.sp-ex-info { font-size: 13px; color: var(--muted); margin: 8px 0 4px; }
+.sp-exam .progress { margin: 8px 0 0; }
+
+.sp-cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.sp-day {
+  position: relative; height: 62px; border-radius: 10px; background: var(--surface-2); overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; padding: 5px 2px 4px; gap: 3px;
+}
+.sp-day b { font-size: 13px; position: relative; z-index: 1; }
+.sp-day small { font-size: 10px; font-weight: 700; color: var(--muted); position: relative; z-index: 1; white-space: nowrap; }
+.sp-day.today { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sp-day.exam { background: color-mix(in srgb, var(--c) 22%, var(--surface-2)); }
+.sp-day.exam small { color: var(--c); }
+.sp-stack { display: flex; width: 80%; height: 6px; border-radius: 3px; overflow: hidden; gap: 1px; position: relative; z-index: 1; }
+.sp-stack i { min-width: 3px; }
+.sp-fill { position: absolute; left: 0; right: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sp-day:active { transform: scale(.94); }
+
+.topic .topic-name { flex: 1; min-width: 0; text-align: left; font-size: 15px; }
+.topic .topic-name small { display: block; font-size: 12px; color: var(--muted); }
+.topic-checks { display: flex; flex-direction: column; gap: 2px; max-height: 240px; overflow-y: auto; background: var(--surface); border-radius: 12px; padding: 4px 10px; }
+.sub-card .topic-checks { background: var(--surface); }
+.tcheck { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14.5px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.tcheck:last-child { border-bottom: 0; }
+.tcheck input { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
+.tcheck span { flex: 1; }
+.tcheck em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 6px; padding: 2px 6px; }
+.big-area { height: 200px; font-size: 15px; }
+.paste-count { height: 48px; display: flex; align-items: center; font-weight: 800; font-size: 17px; color: var(--accent); }

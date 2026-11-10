@@ -5,7 +5,7 @@
 //  Cuando cambies archivos, sube el número de versión.
 // =============================================================
 
-const CACHE = 'unilog-v12';
+const CACHE = 'unilog-v13';
 const ASSETS = [
   './',
   './index.html',
@@ -16,6 +16,7 @@ const ASSETS = [
   './js/fx.js',
   './js/plan.js',
   './js/ai.js',
+  './js/studyplan.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

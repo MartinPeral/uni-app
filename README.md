@@ -2,6 +2,13 @@
 
 App web instalable (PWA) para organizar la universidad: asignaturas, horario, exámenes, prácticas, entregas, métodos de evaluación y notas. Funciona sin conexión y los datos se guardan en el propio móvil.
 
+## Novedades de la versión 3.1 (plan de estudio)
+
+- **Temarios completos:** en cada asignatura (Info → Temario → *Pegar el temario entero*) pegas la lista de temas, uno por línea, y se añaden con sus horas estimadas. Tocando un tema cambias sus horas y cómo lo llevas.
+- **Temas de cada examen:** al editar un examen marcas qué temas entran. Si no marcas nada, los parciales se reparten el temario en orden y los finales entran con todo.
+- **Plan hasta los exámenes** (Estudio → *Plan hasta los exámenes*): eliges tus horas entre semana y en fin de semana y hasta cuándo (2 semanas, 1 mes o hasta el último examen). La app reparte los temas día a día en los huecos entre clases, con repaso general el día antes de cada examen, y te dice si llegas a cada uno. Calendario con lo que toca cada día.
+- El tutor IA ve el plan y los temas de cada examen, y lo puede revisar.
+
 ## Novedades de la versión 3.0 (planning y tutor IA)
 
 - **Planning diario** (Hoy → Tu día → Ver todo): tus clases y tus bloques de estudio, tareas, descansos y cosas personales en una línea del tiempo, con los huecos libres y la hora actual. Tareas sin hora. Desliza para marcar hecho o borrar, y para cambiar de día.
@@ -78,7 +85,7 @@ Abre la carpeta en VS Code, clic derecho en `index.html` → **Open with Live Se
 
 ## Actualizarla
 
-Sube los cambios y cambia `CACHE = 'unilog-v12'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
+Sube los cambios y cambia `CACHE = 'unilog-v13'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
 
 ## Copias de seguridad
 

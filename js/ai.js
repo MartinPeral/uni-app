@@ -6,6 +6,7 @@
 import * as S from './store.js';
 import * as St from './study.js';
 import * as Pl from './plan.js';
+import * as SP from './studyplan.js';
 
 /** Servidor por defecto: el de GymLog, que atiende a las dos apps */
 export const DEFAULT_AI_URL = 'https://gymlog-ai.martinperal10.workers.dev';
@@ -89,6 +90,18 @@ export function buildContext() {
   }
   const closed = S.record();
   if (closed.passed.length) L.push(`EXPEDIENTE: media ${n(closed.weighted)}, ${n(closed.credits, 1)} de ${closed.total} ECTS aprobados.`);
+
+  // Plan de estudio de los próximos días
+  const sp = SP.contextLines(10);
+  if (sp.length) {
+    L.push('PLAN DE ESTUDIO (próximos días y exámenes):');
+    L.push(...sp);
+  }
+  // Temas que entran en cada examen próximo
+  for (const ex of S.upcoming({ kinds: ['examen'], days: 60 }).slice(0, 6)) {
+    const ts = SP.examTopics(ex);
+    if (ts.length) L.push(`TEMAS DE "${ex.title}" (${S.shortName(S.subject(ex.subjectId))}): ${ts.map((t) => `${t.name} [dominio ${St.confOf(t)}, ~${SP.topicHours(t)} h]`).join(', ')}.`);
+  }
 
   // Estudio
   const x = st.study;

@@ -6,9 +6,10 @@ import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
 import * as Pl from './plan.js';
+import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.1';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -138,9 +139,10 @@ const TAB_OF = {
   notas: 'notas',
   estudio: 'estudio',
   plan: 'inicio',
+  'plan-estudio': 'estudio',
   tutor: 'inicio',
 };
-const DEPTH = { asignatura: 1, ajustes: 1, plan: 1, tutor: 2 };
+const DEPTH = { asignatura: 1, ajustes: 1, plan: 1, tutor: 2, 'plan-estudio': 1 };
 let enterTimer;
 const NO_TABS = ['ajustes'];
 
@@ -157,6 +159,7 @@ function render() {
     ajustes: viewSettings,
     estudio: viewStudy,
     plan: viewPlan,
+    'plan-estudio': viewStudyPlan,
     tutor: viewTutor,
   };
   const view = views[r.name];
@@ -1025,7 +1028,7 @@ function infoTab(s) {
       ${topics.map((t) => `
         <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
           ${confMeter(t, s)}
-          <span>${esc(t.name)}<small>${St.CONF[St.confOf(t)].label}</small></span>
+          <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${fmt(SP.topicHours(t), 1)} h</small></button>
           <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
         </div>`).join('')}
       <form class="topic-new" data-save="add-topic" data-id="${s.id}">
@@ -1033,7 +1036,8 @@ function infoTab(s) {
         <button class="icon-btn sm" type="submit" aria-label="Añadir tema">${I.plusSm}</button>
       </form>
     </div>
-    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas (sin empezar, flojo, bien, dominado). Con esto se reparte el estudio hasta el examen en la pestaña Estudio.</p>
+    <button class="btn sm ghost mt" data-action="paste-topics" data-id="${s.id}">${I.list} Pegar el temario entero</button>
+    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas (sin empezar, flojo, bien, dominado) y el nombre para cambiar las horas que le calculas. Con esto se hace el plan de estudio hasta los exámenes.</p>
 
     <h2 class="section-title">Enlaces</h2>
     ${(s.links || []).length ? `<div class="card flush">${s.links.map((l) => `
@@ -1616,6 +1620,12 @@ function viewStudy() {
 
     ${timerCard()}
 
+    <a class="card sp-cta" href="#/plan-estudio">
+      <span class="coach-ico">${I.cal}</span>
+      <span class="row-text"><strong>Plan hasta los exámenes</strong><small>${spCtaText()}</small></span>
+      ${I.chevron}
+    </a>
+
     <h2 class="section-title">Qué estudiar hoy</h2>
     ${planList()}
 
@@ -1851,7 +1861,12 @@ function viewPlan() {
         <button class="icon-btn sm" type="submit" aria-label="Añadir tarea">${I.plusSm}</button>
       </form>
     </div>
-    <button class="btn ghost block mt" data-action="new-block">${I.plusSm} Añadir bloque con hora</button>`;
+    <button class="btn ghost block mt" data-action="new-block">${I.plusSm} Añadir bloque con hora</button>
+    <a class="card sp-cta mt" href="#/plan-estudio">
+      <span class="coach-ico">${I.cal}</span>
+      <span class="row-text"><strong>Plan hasta los exámenes</strong><small>Reparte el temario de varias semanas en tus días</small></span>
+      ${I.chevron}
+    </a>`;
 }
 
 /** Tarjeta "Tu día" en Hoy: qué toca ahora y lo siguiente */
@@ -1965,6 +1980,139 @@ function runAutoPlan(date) {
 }
 
 // =============================================================
+//  PLAN DE ESTUDIO (varios días hasta los exámenes)
+// =============================================================
+
+function spCtaText() {
+  const sum = SP.settings().summary;
+  if (!sum) return 'Reparte el temario de cada asignatura día a día hasta el examen';
+  const short = sum.summary.filter((x) => x.left > 0).length;
+  return short ? `${short} ${short === 1 ? 'examen no llega' : 'exámenes no llegan'} con tu tiempo: revísalo` : `Planificado hasta el ${dayMonth(sum.to)}`;
+}
+
+const hoursLabel = (h) => (h === 0 ? 'Nada' : `${fmt(h, 1)} h`);
+
+function viewStudyPlan() {
+  const cfg = SP.settings();
+  const to = SP.horizonEnd(cfg.horizon);
+  const exams = SP.planExams(to);
+  const subs = S.activeSubjects().filter((s) => S.isThisYear(s) || !s.academicYear);
+  const sum = cfg.summary;
+  const today = S.ymd();
+  const byId = new Map((sum?.summary || []).map((x) => [x.examId, x]));
+
+  const syllabus = subs.map((s) => {
+    const n = (s.topics || []).length;
+    const h = (s.topics || []).reduce((a, t) => a + SP.topicHours(t), 0);
+    return `
+      <div class="sp-sub" style="--c:${subjColor(s)}">
+        <span class="row-text"><strong><b class="sdot"></b>${esc(s.name)}</strong>
+          <small class="${n ? '' : 'text-bad'}">${n ? `${n} temas · ~${fmt(h, 1)} h de estudio` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
+        <button class="btn sm ${n ? 'ghost' : 'primary'}" data-action="paste-topics" data-id="${s.id}">${n ? 'Añadir' : 'Pegar temario'}</button>
+      </div>`;
+  }).join('');
+
+  const examRows = exams.map((ex) => {
+    const s = S.subject(ex.subjectId);
+    const w = SP.examWork(ex);
+    const r = byId.get(ex.id);
+    const ok = r && r.left === 0;
+    const pctDone = r && r.need ? Math.min(1, (r.need - r.left) / r.need) : 0;
+    return `
+      <div class="sp-exam" style="--c:${subjColor(s)}">
+        <div class="sp-ex-head">
+          <span class="plan-days ${S.daysUntil(ex.date) <= 7 ? 'soon' : ''}"><b>${S.daysUntil(ex.date)}</b>${S.daysUntil(ex.date) === 1 ? 'día' : 'días'}</span>
+          <div class="row-text"><strong>${esc(s.name)}</strong><small>${esc(ex.title)} · ${shortDate(ex.date)}</small></div>
+          <button class="btn sm ghost" data-action="edit-item" data-id="${ex.id}">Temas</button>
+        </div>
+        <p class="sp-ex-info">${w.topics.length ? `${w.topics.length} temas${ex.topicIds?.length ? '' : ' (automático)'} · te faltan ~${mins(w.need)} según lo que dominas` : '<span class="text-bad">Sin temas: añade el temario o márcalos en el examen</span>'}</p>
+        ${r && w.topics.length ? `
+          <div class="progress"><i style="width:${pctDone * 100}%;background:${ok ? 'var(--good)' : 'var(--ok)'}"></i></div>
+          <p class="sp-ex-info ${ok ? 'text-good' : 'text-bad'}">${ok ? `Planificado entero${r.review ? ` + ${mins(r.review)} de repaso` : ''}` : `Faltan ${mins(r.left)} sin hueco: sube tus horas o empieza antes`}</p>` : ''}
+      </div>`;
+  }).join('');
+
+  // Calendario del periodo
+  const days = [];
+  for (let d = S.toDate(today); S.ymd(d) <= to; d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1)) days.push(S.ymd(d));
+  const byDay = SP.plannedByDay(today, to);
+  const examDays = new Map(exams.map((e) => [e.date, e]));
+  const maxM = Math.max(60, ...Object.values(byDay).map((x) => x.total));
+  const pad = S.weekday(S.toDate(today)) - 1;
+  const cal = `
+    <div class="sp-cal">
+      ${S.DAYS_SHORT.map((x) => `<span class="mh">${x}</span>`).join('')}
+      ${'<span></span>'.repeat(pad)}
+      ${days.map((date) => {
+        const x = byDay[date];
+        const ex = examDays.get(date);
+        return `
+          <button class="sp-day ${date === today ? 'today' : ''} ${ex ? 'exam' : ''}" data-action="sp-day" data-v="${date}" ${ex ? `style="--c:${subjColor(S.subject(ex.subjectId))}"` : ''}>
+            <b>${S.toDate(date).getDate()}</b>
+            <span class="sp-stack">${x ? [...x.bySubject].map(([sid, m]) => `<i style="flex:${m};background:${subjColor(S.subject(sid))}"></i>`).join('') : ''}</span>
+            <small>${ex ? 'Examen' : x ? mins(x.total).replace(' min', '′') : ''}</small>
+            ${x ? `<span class="sp-fill" style="height:${(x.total / maxM) * 100}%"></span>` : ''}
+          </button>`;
+      }).join('')}
+    </div>`;
+
+  return `
+    ${topBar('Plan de estudio', { back: '#/estudio', action: `<button class="icon-btn" data-action="sp-ai" aria-label="Revisar con la IA">${I.sparkle}</button>` })}
+    <p class="lead">Mete el temario de cada asignatura, marca qué entra en cada examen y te reparto el estudio día a día, en los huecos entre tus clases.</p>
+
+    <h2 class="section-title">1 · Temarios</h2>
+    <div class="card flush">${syllabus || '<p class="pad muted">Añade primero tus asignaturas.</p>'}</div>
+
+    <h2 class="section-title">2 · Tu tiempo para estudiar</h2>
+    <div class="card form">
+      <div class="field"><span>Entre semana (cada día)</span>
+        <div class="chips">${[1, 2, 3, 4, 5, 6].map((h) => `<button class="chip ${+cfg.weekday === h ? 'on' : ''}" data-action="sp-set" data-k="weekday" data-v="${h}">${hoursLabel(h)}</button>`).join('')}</div></div>
+      <div class="field"><span>Sábados y domingos</span>
+        <div class="chips">${[0, 2, 3, 4, 5, 6].map((h) => `<button class="chip ${+cfg.weekend === h ? 'on' : ''}" data-action="sp-set" data-k="weekend" data-v="${h}">${hoursLabel(h)}</button>`).join('')}</div></div>
+      <div class="field"><span>Planificar</span>
+        <div class="seg">${[['2w', '2 semanas'], ['month', '1 mes'], ['all', 'Hasta el último examen']].map(([k, l]) =>
+          `<button class="${cfg.horizon === k ? 'on' : ''}" data-action="sp-set" data-k="horizon" data-v="${k}">${l}</button>`).join('')}</div></div>
+      <p class="hint">Solo se usa tu horario del día (${S.state.plan.start}–${S.state.plan.end}, en Ajustes), sin tocar clases, comidas ni lo que ya tengas planificado.</p>
+    </div>
+
+    <h2 class="section-title">3 · Exámenes hasta el ${dayMonth(to)} <span class="count">${exams.length}</span></h2>
+    ${exams.length ? `<div class="stack">${examRows}</div>` : '<p class="hint">No tienes exámenes con fecha en este periodo. Añádelos en cada asignatura (Fechas) o desde Agenda.</p>'}
+
+    <button class="btn primary block big-btn mt-lg" data-action="sp-generate">${I.wand} ${sum ? 'Rehacer el plan' : 'Hacer mi plan de estudio'}</button>
+    <p class="hint center">${sum ? `Último plan: ${sum.blocks} bloques hasta el ${dayMonth(sum.to)}. Al rehacerlo se cambia lo que no has marcado como hecho.` : 'Lo puedes rehacer cuando quieras: lo que ya hayas hecho se respeta.'}</p>
+
+    ${sum ? `
+      <h2 class="section-title">Tu calendario de estudio</h2>
+      <div class="card">${cal}<p class="hint">Toca un día para ver su planning con las horas.</p></div>
+      <button class="btn block mt" data-action="sp-ai">${I.sparkle} Que la IA revise mi plan</button>` : ''}`;
+}
+
+function openPasteTopics(id) {
+  const s = S.subject(id);
+  sheetCtx = { id };
+  openSheet(`Temario de ${esc(S.shortName(s))}`, `
+    <p class="hint">Pega la lista de temas, uno por línea. Puedes copiarla del PDF de la guía docente o de la Enseñanza Virtual: quito solo los números y los «Tema 1.».</p>
+    <textarea class="input area big-area" name="text" placeholder="Tema 1. Introducción a los grafos&#10;Tema 2. Recorridos en anchura y profundidad&#10;Tema 3. Caminos mínimos&#10;…"></textarea>
+    <div class="two">
+      ${field('Horas por tema (aprox.)', text('hours', '3', 'inputmode="decimal"'))}
+      <div class="field"><span>Vista previa</span><div class="paste-count" id="paste-count">0 temas</div></div>
+    </div>
+    ${(s.topics || []).length ? `<label class="check"><input type="checkbox" name="replace"><span>Sustituir los ${s.topics.length} temas que ya tiene</span></label>` : ''}`,
+  'save-topics');
+}
+
+function openTopicSheet(subjectId, topicId) {
+  const t = St.topicOf(subjectId, topicId);
+  if (!t) return;
+  sheetCtx = { subjectId, topicId };
+  openSheet('Tema', `
+    ${field('Nombre', text('name', t.name, 'autocapitalize="sentences"'))}
+    ${field('Horas que le calculas', text('hours', fmt(SP.topicHours(t), 1), 'inputmode="decimal"'))}
+    <div class="field"><span>Cómo lo llevas</span>${segPick('conf', St.CONF.map((c, i) => [i, c.short]), St.confOf(t))}</div>
+    <p class="hint">El plan reparte las horas según lo que lo domines: un tema «bien» necesita menos de la mitad que uno sin empezar.</p>`, 'save-topic');
+}
+
+// =============================================================
 //  TUTOR IA
 // =============================================================
 
@@ -1977,6 +2125,7 @@ const TUTOR_SUGGESTIONS = [
   '¿Qué estudio ahora?',
   '¿Cómo voy en cada asignatura?',
   'Hazme un plan para mi próximo examen',
+  '¿Llego bien a los exámenes con mi plan?',
   'Estoy agobiado, ¿por dónde empiezo?',
 ];
 
@@ -2590,13 +2739,32 @@ function openItemSheet(id, preset = {}) {
       <p class="hint">"Nota mínima": lo que tienes que sacar en esta prueba para que haga media (por ejemplo, un 4 en cada parcial). "Peso": si dentro del mismo apartado unas pruebas cuentan más que otras (la práctica 3 vale el doble: peso 2).</p>
     </div>
     <label class="check only-deliv" ${it.kind === 'practica' || it.kind === 'entrega' ? '' : 'hidden'}><input type="checkbox" name="done" ${it.done ? 'checked' : ''}><span>Entregada</span></label>
-    ${field('Notas', `<textarea class="input area" name="notes" placeholder="Temario, material permitido…">${esc(it.notes)}</textarea>`)}`,
+    <div class="only-exam-topics" ${it.kind === 'examen' ? '' : 'hidden'}><div id="exam-topics">${examTopicsField(it.subjectId, it)}</div></div>
+    ${field('Notas', `<textarea class="input area" name="notes" placeholder="Material permitido, tipo de examen…">${esc(it.notes)}</textarea>`)}`,
   'save-item',
   id ? `
     <div class="two mt">
       ${it.date ? `<button class="btn" type="button" data-action="item-ics" data-id="${it.id}">${I.calAdd} Calendario</button>` : ''}
       <button class="btn text-danger" type="button" data-action="del-item" data-id="${it.id}">${I.trash} Eliminar</button>
     </div>` : '');
+}
+
+/** Casillas con los temas que entran en un examen */
+function examTopicsField(subjectId, it) {
+  const s = S.subject(subjectId);
+  const topics = s?.topics || [];
+  if (!topics.length) {
+    return `<p class="hint">Cuando añadas el temario de la asignatura (Info → Temario) podrás marcar qué temas entran en este examen.</p>`;
+  }
+  const sel = new Set(it?.topicIds || []);
+  const auto = it && it.date && !sel.size ? new Set(SP.examTopics(it).map((t) => t.id)) : null;
+  return `
+    <div class="field"><span>Temas que entran ${sel.size ? `<b class="muted">${sel.size} de ${topics.length}</b>` : ''}</span>
+      <div class="topic-checks">${topics.map((t) => `
+        <label class="tcheck"><input type="checkbox" name="topicIds" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}><span>${esc(t.name)}</span>${auto?.has(t.id) ? '<em>auto</em>' : ''}</label>`).join('')}
+      </div>
+    </div>
+    <p class="hint">Si no marcas ninguno, entran los temas que no están en exámenes anteriores de la asignatura${auto ? ' (los marcados como «auto»)' : ''}.</p>`;
 }
 
 /** Anual evaluada en todo el curso: sus pruebas se reparten por cuatrimestre */
@@ -3012,6 +3180,7 @@ const actions = {
     if (name === 'kind' && form.dataset.save === 'save-item') {
       const k = el.dataset.value;
       form.querySelector('.only-exam').hidden = k !== 'examen';
+      form.querySelector('.only-exam-topics').hidden = k !== 'examen';
       form.querySelector('.only-deliv').hidden = !(k === 'practica' || k === 'entrega');
       form.elements.title.placeholder = placeholderFor(k);
       // Ajusta el apartado al tipo si no se ha tocado
@@ -3261,6 +3430,7 @@ const actions = {
       weight: parseNum(d.weight) || 1,
       done: !!d.done || (g != null && d.kind !== 'examen'),
       notes: d.notes.trim(),
+      topicIds: d.kind === 'examen' ? new FormData(overlay.querySelector('form')).getAll('topicIds') : [],
     });
     if (isNew) S.state.items.push(it);
     S.save();
@@ -3418,6 +3588,52 @@ const actions = {
     render();
     app.querySelector('[data-save="add-task"] input')?.focus();
   },
+
+  // --- Plan de estudio ---
+  'paste-topics': (el) => openPasteTopics(el.dataset.id),
+  'save-topics': () => {
+    const d = formData();
+    const names = SP.parseSyllabus(d.text);
+    if (!names.length) return toast('Pega al menos un tema');
+    const s = S.subject(sheetCtx.id);
+    const n = SP.addTopics(s, names, parseNum(d.hours) || 3, !!d.replace);
+    closeOverlay();
+    haptic('success');
+    toast(n ? `${n} ${n === 1 ? 'tema añadido' : 'temas añadidos'}` : 'Esos temas ya estaban');
+    render();
+  },
+  'edit-topic': (el) => openTopicSheet(el.dataset.id, el.dataset.t),
+  'save-topic': () => {
+    const d = formData();
+    const t = St.topicOf(sheetCtx.subjectId, sheetCtx.topicId);
+    if (!d.name.trim()) return toast('Ponle un nombre');
+    t.name = d.name.trim();
+    t.hours = Math.min(100, Math.max(0.25, parseNum(d.hours) || 3));
+    St.setConf(t, +d.conf);
+    S.save();
+    closeOverlay();
+    render();
+  },
+  'sp-set': (el) => {
+    const cfg = SP.settings();
+    cfg[el.dataset.k] = el.dataset.k === 'horizon' ? el.dataset.v : +el.dataset.v;
+    S.save();
+    haptic();
+    render();
+  },
+  'sp-generate': () => {
+    const res = SP.generate();
+    const n = res.added.length;
+    haptic(n ? 'success' : 'heavy');
+    render();
+    if (!n) { toast('No he podido meter nada: revisa temarios, exámenes y horas'); return; }
+    const short = res.summary.filter((x) => x.left > 0).length;
+    if (!short) confetti({ power: 0.8 });
+    undoable(`${n} bloques de estudio hasta el ${dayMonth(res.to)}`, () => SP.undoGenerate(res));
+    setTimeout(() => app.querySelector('.sp-cal')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200);
+  },
+  'sp-day': (el) => { planDate = el.dataset.v; go('#/plan'); },
+  'sp-ai': () => openTutor('Revisa mi plan de estudio hasta los exámenes: ¿llego bien a todos? ¿Qué cambiarías?'),
 
   // --- Tutor IA ---
   'go-tutor': () => openTutor(),
@@ -3715,6 +3931,11 @@ document.addEventListener('submit', (e) => {
 
 document.addEventListener('input', (e) => {
   const t = e.target;
+  if (t.name === 'text' && t.closest('form[data-save="save-topics"]')) {
+    const n = SP.parseSyllabus(t.value).length;
+    document.getElementById('paste-count').textContent = `${n} ${n === 1 ? 'tema' : 'temas'}`;
+    return;
+  }
   if (t.dataset.wz && wz) {
     wz.d[t.dataset.wz] = t.value;
     if (t.dataset.wz === 'wt') {
@@ -3785,6 +4006,7 @@ document.addEventListener('change', async (e) => {
     const pickId = defaultComp(S.subject(t.value), kind);
     document.getElementById('comp-sel').innerHTML = select('compId', opts, pickId);
     form.querySelector('.only-annual-item').hidden = !annualNoSplit(t.value);
+    document.getElementById('exam-topics').innerHTML = examTopicsField(t.value, null);
     return;
   }
 
