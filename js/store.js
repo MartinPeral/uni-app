@@ -278,27 +278,74 @@ export function grade10(it, sim) {
 }
 
 /** ¿Está pendiente? Exámenes sin nota o entregas sin entregar */
+/** ¿Es un examen? Los de teoría y también los exámenes o controles de prácticas */
+export const isExamItem = (i) => i.kind === 'examen' || (i.kind === 'practica' && !!i.exam);
+
+/** Parece un examen de prácticas por el título */
+export const looksLikeExam = (title = '') => /examen|control|parcial|prueba/i.test(title);
+
+/** Teoría o prácticas: de qué parte es un examen */
+export function examArea(i) {
+  if (i.kind === 'practica') return 'practicas';
+  const s = subject(i.subjectId);
+  const c = s?.comps?.find((x) => x.id === i.compId);
+  return c && areaOf(c) === 'practicas' ? 'practicas' : 'teoria';
+}
+
+/** Teoría o prácticas: de qué parte es un tema */
+export const topicArea = (t) => (t.area === 'practicas' ? 'practicas' : 'teoria');
+
 export function isPending(it) {
-  if (it.kind === 'examen' || it.kind === 'otro') return it.grade == null;
+  if (it.kind === 'examen' || it.kind === 'otro' || it.exam) return it.grade == null;
   return !it.done && it.grade == null;
 }
 
 /** Evaluables con fecha de hoy en adelante, ordenados */
-export function upcoming({ kinds, days = 3650, pendingOnly = true } = {}) {
+export function upcoming({ kinds, exams = false, days = 3650, pendingOnly = true } = {}) {
   const today = ymd();
   return state.items
     .filter((i) => i.date && i.date >= today && daysUntil(i.date) <= days)
     .filter((i) => !kinds || kinds.includes(i.kind))
+    .filter((i) => !exams || isExamItem(i))
     .filter((i) => !pendingOnly || isPending(i))
     .filter((i) => subject(i.subjectId))
     .sort(byDate);
+}
+
+const examsOfSubject = (s) => itemsOf(s.id).filter((i) => isExamItem(i) && i.date).sort(byDate);
+const isPartialExam = (e) => e.call === 'Parcial' || /parcial|control/i.test(e.title || '')
+  || (e.kind === 'practica' && !/final/i.test(e.title || ''));
+
+/**
+ * Temas de un examen (de su parte: teoría o prácticas):
+ * - los marcados en el examen, si hay;
+ * - si no, los parciales y controles se reparten en orden lo que no
+ *   esté marcado en otros exámenes;
+ * - un final entra con todo el temario de su parte.
+ */
+export function examTopics(exam) {
+  const s = subject(exam.subjectId);
+  if (!s) return [];
+  const all = s.topics || [];
+  if (exam.topicIds?.length) return all.filter((t) => exam.topicIds.includes(t.id));
+  const area = examArea(exam);
+  const topics = all.filter((t) => topicArea(t) === area);
+  if (!isPartialExam(exam)) return topics;
+  const exams = examsOfSubject(s).filter((e) => examArea(e) === area);
+  const claimed = new Set(exams.flatMap((e) => e.topicIds || []));
+  const free = topics.filter((t) => !claimed.has(t.id));
+  const partials = exams.filter((e) => isPartialExam(e) && !e.topicIds?.length);
+  const k = partials.findIndex((e) => e.id === exam.id);
+  if (k < 0 || !free.length) return [];
+  const per = free.length / partials.length;
+  return free.slice(Math.round(k * per), Math.round((k + 1) * per));
 }
 
 /** Prácticas/entregas pasadas de fecha y sin entregar */
 export function overdue() {
   const today = ymd();
   return state.items
-    .filter((i) => i.date && i.date < today && (i.kind === 'practica' || i.kind === 'entrega') && !i.done && i.grade == null)
+    .filter((i) => i.date && i.date < today && ((i.kind === 'practica' && !i.exam) || i.kind === 'entrega') && !i.done && i.grade == null)
     .filter((i) => subject(i.subjectId) && !subject(i.subjectId).final)
     .sort(byDate);
 }
@@ -893,7 +940,7 @@ export function applyPreset(s, preset) {
     });
     preset.comps.forEach((c) => { if (c.replacesKey) ids[c.key].replaces = ids[c.replacesKey].id; });
     for (const [key, kind, title, period] of preset.items) {
-      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title, period, call: kind === 'examen' ? 'Parcial' : '' }));
+      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title, period, call: kind === 'examen' ? 'Parcial' : '', exam: kind === 'practica' && looksLikeExam(title) }));
     }
     return;
   }
@@ -1024,7 +1071,7 @@ export function loadDemo() {
     [3, 'practica', 'Examen de prácticas 3', d(100), null, null],
   ].forEach(([ci, kind, title, date, grade, min]) => state.items.push(newItem({
     subjectId: pa.id, compId: pa.comps[ci].id, kind, title, date, time: kind === 'examen' ? '10:00' : '11:00',
-    grade, min, done: grade != null, call: kind === 'examen' ? 'Parcial' : '',
+    grade, min, done: grade != null, call: kind === 'examen' ? 'Parcial' : '', exam: kind === 'practica',
   })));
 
   // Asignaturas ya superadas del curso anterior

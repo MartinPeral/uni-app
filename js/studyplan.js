@@ -40,16 +40,16 @@ export function parseSyllabus(text) {
 }
 
 /** Añade temas a una asignatura sin repetir. Devuelve cuántos se han añadido */
-export function addTopics(s, names, hours, replace = false) {
-  if (replace) s.topics = [];
+export function addTopics(s, names, hours, replace = false, area = 'teoria') {
   s.topics = s.topics || [];
+  if (replace) s.topics = s.topics.filter((t) => S.topicArea(t) !== area);
   const have = new Set(s.topics.map((t) => S.norm(t.name)));
   let n = 0;
   for (const name of names) {
     const k = S.norm(name);
     if (have.has(k)) continue;
     have.add(k);
-    s.topics.push({ id: S.uid(), name, done: false, conf: 0, hours: hours || DEFAULT_HOURS });
+    s.topics.push({ id: S.uid(), name, done: false, conf: 0, hours: hours || DEFAULT_HOURS, area });
     n++;
   }
   S.save();
@@ -58,32 +58,7 @@ export function addTopics(s, names, hours, replace = false) {
 
 // ---------- Qué entra en cada examen ----------
 
-const examsOf = (s) => S.itemsOf(s.id).filter((i) => i.kind === 'examen' && i.date).sort(S.byDate);
-
-const isPartial = (e) => e.call === 'Parcial' || /parcial/i.test(e.title || '');
-
-/**
- * Temas de un examen:
- * - los marcados en el examen, si hay;
- * - si no, un parcial se queda con su parte del temario que no esté
- *   marcada en otros exámenes (los parciales se lo reparten en orden);
- * - un final (o cualquier otro examen) entra con todo el temario.
- */
-export function examTopics(exam) {
-  const s = S.subject(exam.subjectId);
-  if (!s) return [];
-  const topics = s.topics || [];
-  if (exam.topicIds?.length) return topics.filter((t) => exam.topicIds.includes(t.id));
-  if (!isPartial(exam)) return topics;
-  const exams = examsOf(s);
-  const claimed = new Set(exams.flatMap((e) => e.topicIds || []));
-  const free = topics.filter((t) => !claimed.has(t.id));
-  const partials = exams.filter((e) => isPartial(e) && !e.topicIds?.length);
-  const k = partials.findIndex((e) => e.id === exam.id);
-  if (k < 0 || !free.length) return [];
-  const per = free.length / partials.length;
-  return free.slice(Math.round(k * per), Math.round((k + 1) * per));
-}
+export const examTopics = S.examTopics;
 
 /** Minutos que faltan para preparar un examen (según el dominio de cada tema) */
 export function examWork(exam) {
@@ -94,7 +69,7 @@ export function examWork(exam) {
 
 /** Exámenes que entran en el plan */
 export function planExams(to) {
-  return S.upcoming({ kinds: ['examen'], days: 400 })
+  return S.upcoming({ exams: true, days: 400 })
     .filter((i) => i.date <= to && !S.subject(i.subjectId)?.final);
 }
 
@@ -102,7 +77,7 @@ export function horizonEnd(h = L().horizon) {
   const t = new Date();
   if (h === '2w') return S.ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 14));
   if (h === 'month') return S.ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 30));
-  const last = S.upcoming({ kinds: ['examen'], days: 150 }).pop();
+  const last = S.upcoming({ exams: true, days: 150 }).pop();
   return last ? last.date : S.ymd(new Date(t.getFullYear(), t.getMonth(), t.getDate() + 30));
 }
 
@@ -195,7 +170,7 @@ export function generate() {
     for (const j of jobs) {
       if (addDays(date, 1) !== j.ex.date || cap < 25) continue;
       const len = Math.min(90, cap);
-      if (place(len, { title: `Repaso general ${S.shortName(j.s)} (examen mañana)`, kind: 'study', subjectId: j.s.id })) {
+      if (place(len, { title: `Repaso general ${S.examArea(j.ex) === 'practicas' ? 'de prácticas ' : ''}${S.shortName(j.s)} (examen mañana)`, kind: 'study', subjectId: j.s.id, examId: j.ex.id })) {
         j.planned += len;
         cap -= len;
       }

@@ -1392,3 +1392,18 @@ body.no-tabs .composer { bottom: 0; padding-bottom: calc(var(--safe-bottom) + 10
 .tcheck em { font-style: normal; font-size: 11px; font-weight: 800; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-radius: 6px; padding: 2px 6px; }
 .big-area { height: 200px; font-size: 15px; }
 .paste-count { height: 48px; display: flex; align-items: center; font-weight: 800; font-size: 17px; color: var(--accent); }
+
+/* ---------- Temario de teoría y de prácticas ---------- */
+
+.topic-group + .topic-group { margin-top: 14px; }
+.tg-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 8px; font-size: 13px; }
+.tg-head b { color: var(--a); text-transform: uppercase; letter-spacing: .05em; font-size: 12.5px; }
+.tg-head span { color: var(--muted); font-weight: 600; flex: 1; }
+.tg-head .link { display: inline-flex; align-items: center; gap: 4px; }
+.tg-head .link svg { width: 15px; height: 15px; }
+.tc-group { font-size: 11.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 10px 0 2px; }
+.ptag {
+  font-style: normal; font-size: 10.5px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase;
+  color: var(--a-practicas); background: color-mix(in srgb, var(--a-practicas) 15%, transparent);
+  border-radius: 5px; padding: 1px 5px; vertical-align: 1px;
+}

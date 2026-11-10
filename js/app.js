@@ -9,7 +9,7 @@ import * as Pl from './plan.js';
 import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.1';
+const APP_VERSION = '3.2';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -343,7 +343,7 @@ function statusInfo(s, c) {
 function itemRow(it, { showSubject = true, showDate = true } = {}) {
   const s = S.subject(it.subjectId);
   const g = S.grade10(it);
-  const deliverable = it.kind === 'practica' || it.kind === 'entrega';
+  const deliverable = (it.kind === 'practica' && !it.exam) || it.kind === 'entrega';
   const late = it.date && S.daysUntil(it.date) < 0 && S.isPending(it) && deliverable;
   const right = g != null
     ? gradeBadge(g)
@@ -454,7 +454,7 @@ function todayList() {
 }
 
 function examCards() {
-  const exams = S.upcoming({ kinds: ['examen'] }).slice(0, 4);
+  const exams = S.upcoming({ exams: true }).slice(0, 4);
   if (!exams.length) return '';
   return `
     <h2 class="section-title">Próximos exámenes</h2>
@@ -465,7 +465,7 @@ function examCards() {
         <button class="exam-card ${n <= 7 ? 'soon' : ''}" data-action="edit-item" data-id="${it.id}" data-long="item" style="--c:${subjColor(s)}">
           <span class="exam-days"><b>${n === 0 ? 'Hoy' : n}</b>${n === 0 ? '' : n === 1 ? 'día' : 'días'}</span>
           <strong>${esc(s.name)}</strong>
-          <small>${esc(it.title)}</small>
+          <small>${esc(it.title)}${it.kind === 'practica' ? ' <em class="ptag">Prácticas</em>' : ''}</small>
           <small class="muted">${shortDate(it.date)}${it.time ? ' · ' + it.time : ''}${it.place ? '<br>' + esc(it.place) : ''}</small>
         </button>`;
     }).join('')}</div>`;
@@ -1024,20 +1024,27 @@ function infoTab(s) {
 
     <h2 class="section-title">Temario ${topics.length ? `<span class="count">${done}/${topics.length}</span>` : ''}</h2>
     ${topics.length ? `<div class="progress"><i style="width:${(done / topics.length) * 100}%;background:${subjColor(s)}"></i></div>` : ''}
-    <div class="card flush topics">
-      ${topics.map((t) => `
-        <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
-          ${confMeter(t, s)}
-          <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${fmt(SP.topicHours(t), 1)} h</small></button>
-          <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
-        </div>`).join('')}
-      <form class="topic-new" data-save="add-topic" data-id="${s.id}">
-        <input class="input" name="topic" placeholder="Añadir tema…" enterkeyhint="done" autocomplete="off">
-        <button class="icon-btn sm" type="submit" aria-label="Añadir tema">${I.plusSm}</button>
-      </form>
-    </div>
-    <button class="btn sm ghost mt" data-action="paste-topics" data-id="${s.id}">${I.list} Pegar el temario entero</button>
-    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas (sin empezar, flojo, bien, dominado) y el nombre para cambiar las horas que le calculas. Con esto se hace el plan de estudio hasta los exámenes.</p>
+    ${['teoria', 'practicas'].map((area) => {
+      const list = topics.filter((t) => S.topicArea(t) === area);
+      return `
+      <div class="topic-group ${area}">
+        <div class="tg-head"><b>${area === 'teoria' ? 'Teoría' : 'Prácticas'}</b><span>${list.length ? `${list.length} temas · ${fmt(list.reduce((x, t) => x + SP.topicHours(t), 0), 1)} h` : 'Sin temas'}</span>
+          <button class="link" data-action="paste-topics" data-id="${s.id}" data-area="${area}">${I.list} Pegar lista</button></div>
+        <div class="card flush topics">
+          ${list.map((t) => `
+            <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
+              ${confMeter(t, s)}
+              <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${fmt(SP.topicHours(t), 1)} h</small></button>
+              <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
+            </div>`).join('')}
+          <form class="topic-new" data-save="add-topic" data-id="${s.id}" data-area="${area}">
+            <input class="input" name="topic" placeholder="${area === 'teoria' ? 'Añadir tema de teoría…' : 'Añadir práctica o tema de prácticas…'}" enterkeyhint="done" autocomplete="off">
+            <button class="icon-btn sm" type="submit" aria-label="Añadir">${I.plusSm}</button>
+          </form>
+        </div>
+      </div>`;
+    }).join('')}
+    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas y el nombre para cambiar sus horas. Los temas de prácticas son para los exámenes y controles de prácticas.</p>
 
     <h2 class="section-title">Enlaces</h2>
     ${(s.links || []).length ? `<div class="card flush">${s.links.map((l) => `
@@ -1137,11 +1144,12 @@ function monday(offset = 0) {
 function agendaList() {
   const today = S.ymd();
   const kinds = agendaKind === 'all' ? null : [agendaKind];
-  const all = S.state.items.filter((i) => S.subject(i.subjectId)).filter((i) => !kinds || kinds.includes(i.kind));
+  const all = S.state.items.filter((i) => S.subject(i.subjectId))
+    .filter((i) => !kinds || (agendaKind === 'examen' ? S.isExamItem(i) : kinds.includes(i.kind)));
   const next = all.filter((i) => i.date && i.date >= today).sort(S.byDate);
   const nodate = all.filter((i) => !i.date && S.isPending(i));
   const past = all.filter((i) => i.date && i.date < today).sort(S.byDate).reverse();
-  const late = past.filter((i) => S.isPending(i) && (i.kind === 'practica' || i.kind === 'entrega'));
+  const late = past.filter((i) => S.isPending(i) && ((i.kind === 'practica' && !i.exam) || i.kind === 'entrega'));
 
   const group = (list) => {
     const m = new Map();
@@ -2004,11 +2012,12 @@ function viewStudyPlan() {
   const syllabus = subs.map((s) => {
     const n = (s.topics || []).length;
     const h = (s.topics || []).reduce((a, t) => a + SP.topicHours(t), 0);
+    const np = (s.topics || []).filter((t) => S.topicArea(t) === 'practicas').length;
     return `
       <div class="sp-sub" style="--c:${subjColor(s)}">
         <span class="row-text"><strong><b class="sdot"></b>${esc(s.name)}</strong>
-          <small class="${n ? '' : 'text-bad'}">${n ? `${n} temas · ~${fmt(h, 1)} h de estudio` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
-        <button class="btn sm ${n ? 'ghost' : 'primary'}" data-action="paste-topics" data-id="${s.id}">${n ? 'Añadir' : 'Pegar temario'}</button>
+          <small class="${n ? '' : 'text-bad'}">${n ? `${n - np} de teoría${np ? ` · ${np} de prácticas` : ''} · ~${fmt(h, 1)} h` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
+        <button class="btn sm ${n ? 'ghost' : 'primary'}" data-action="paste-topics" data-id="${s.id}" data-area="${n && !np ? 'practicas' : 'teoria'}">${n ? 'Añadir' : 'Pegar temario'}</button>
       </div>`;
   }).join('');
 
@@ -2022,10 +2031,10 @@ function viewStudyPlan() {
       <div class="sp-exam" style="--c:${subjColor(s)}">
         <div class="sp-ex-head">
           <span class="plan-days ${S.daysUntil(ex.date) <= 7 ? 'soon' : ''}"><b>${S.daysUntil(ex.date)}</b>${S.daysUntil(ex.date) === 1 ? 'día' : 'días'}</span>
-          <div class="row-text"><strong>${esc(s.name)}</strong><small>${esc(ex.title)} · ${shortDate(ex.date)}</small></div>
+          <div class="row-text"><strong>${esc(s.name)}</strong><small>${ex.kind === 'practica' ? '<em class="ptag">Prácticas</em> ' : ''}${esc(ex.title)} · ${shortDate(ex.date)}</small></div>
           <button class="btn sm ghost" data-action="edit-item" data-id="${ex.id}">Temas</button>
         </div>
-        <p class="sp-ex-info">${w.topics.length ? `${w.topics.length} temas${ex.topicIds?.length ? '' : ' (automático)'} · te faltan ~${mins(w.need)} según lo que dominas` : '<span class="text-bad">Sin temas: añade el temario o márcalos en el examen</span>'}</p>
+        <p class="sp-ex-info">${w.topics.length ? `${w.topics.length} temas${ex.topicIds?.length ? '' : ' (automático)'} · te faltan ~${mins(w.need)} según lo que dominas` : `<span class="text-bad">Sin temas: añade el temario de ${S.examArea(ex) === 'practicas' ? 'prácticas' : 'teoría'} o márcalos en el examen</span>`}</p>
         ${r && w.topics.length ? `
           <div class="progress"><i style="width:${pctDone * 100}%;background:${ok ? 'var(--good)' : 'var(--ok)'}"></i></div>
           <p class="sp-ex-info ${ok ? 'text-good' : 'text-bad'}">${ok ? `Planificado entero${r.review ? ` + ${mins(r.review)} de repaso` : ''}` : `Faltan ${mins(r.left)} sin hueco: sube tus horas o empieza antes`}</p>` : ''}
@@ -2087,17 +2096,19 @@ function viewStudyPlan() {
       <button class="btn block mt" data-action="sp-ai">${I.sparkle} Que la IA revise mi plan</button>` : ''}`;
 }
 
-function openPasteTopics(id) {
+function openPasteTopics(id, area = 'teoria') {
   const s = S.subject(id);
   sheetCtx = { id };
+  const count = (a) => (s.topics || []).filter((t) => S.topicArea(t) === a).length;
   openSheet(`Temario de ${esc(S.shortName(s))}`, `
-    <p class="hint">Pega la lista de temas, uno por línea. Puedes copiarla del PDF de la guía docente o de la Enseñanza Virtual: quito solo los números y los «Tema 1.».</p>
+    <div class="field"><span>Es el temario de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], area)}</div>
+    <p class="hint">Pega la lista de temas (o de prácticas), uno por línea. Puedes copiarla del PDF de la guía docente o de la Enseñanza Virtual: quito solo los números y los «Tema 1.».</p>
     <textarea class="input area big-area" name="text" placeholder="Tema 1. Introducción a los grafos&#10;Tema 2. Recorridos en anchura y profundidad&#10;Tema 3. Caminos mínimos&#10;…"></textarea>
     <div class="two">
       ${field('Horas por tema (aprox.)', text('hours', '3', 'inputmode="decimal"'))}
       <div class="field"><span>Vista previa</span><div class="paste-count" id="paste-count">0 temas</div></div>
     </div>
-    ${(s.topics || []).length ? `<label class="check"><input type="checkbox" name="replace"><span>Sustituir los ${s.topics.length} temas que ya tiene</span></label>` : ''}`,
+    ${(s.topics || []).length ? `<label class="check"><input type="checkbox" name="replace"><span>Sustituir los temas que ya tiene en esa parte (teoría: ${count('teoria')}, prácticas: ${count('practicas')})</span></label>` : ''}`,
   'save-topics');
 }
 
@@ -2107,6 +2118,7 @@ function openTopicSheet(subjectId, topicId) {
   sheetCtx = { subjectId, topicId };
   openSheet('Tema', `
     ${field('Nombre', text('name', t.name, 'autocapitalize="sentences"'))}
+    <div class="field"><span>Es de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], S.topicArea(t))}</div>
     ${field('Horas que le calculas', text('hours', fmt(SP.topicHours(t), 1), 'inputmode="decimal"'))}
     <div class="field"><span>Cómo lo llevas</span>${segPick('conf', St.CONF.map((c, i) => [i, c.short]), St.confOf(t))}</div>
     <p class="hint">El plan reparte las horas según lo que lo domines: un tema «bien» necesita menos de la mitad que uno sin empezar.</p>`, 'save-topic');
@@ -2738,8 +2750,9 @@ function openItemSheet(id, preset = {}) {
       </div>
       <p class="hint">"Nota mínima": lo que tienes que sacar en esta prueba para que haga media (por ejemplo, un 4 en cada parcial). "Peso": si dentro del mismo apartado unas pruebas cuentan más que otras (la práctica 3 vale el doble: peso 2).</p>
     </div>
-    <label class="check only-deliv" ${it.kind === 'practica' || it.kind === 'entrega' ? '' : 'hidden'}><input type="checkbox" name="done" ${it.done ? 'checked' : ''}><span>Entregada</span></label>
-    <div class="only-exam-topics" ${it.kind === 'examen' ? '' : 'hidden'}><div id="exam-topics">${examTopicsField(it.subjectId, it)}</div></div>
+    <label class="check only-pexam" ${it.kind === 'practica' ? '' : 'hidden'}><input type="checkbox" name="exam" ${(it.exam ?? S.looksLikeExam(it.title)) ? 'checked' : ''}><span>Es un examen o control de prácticas</span></label>
+    <label class="check only-deliv" ${(it.kind === 'practica' && !it.exam) || it.kind === 'entrega' ? '' : 'hidden'}><input type="checkbox" name="done" ${it.done ? 'checked' : ''}><span>Entregada</span></label>
+    <div class="only-exam-topics" ${S.isExamItem(it) ? '' : 'hidden'}><div id="exam-topics">${examTopicsField(it.subjectId, it)}</div></div>
     ${field('Notas', `<textarea class="input area" name="notes" placeholder="Material permitido, tipo de examen…">${esc(it.notes)}</textarea>`)}`,
   'save-item',
   id ? `
@@ -2749,22 +2762,43 @@ function openItemSheet(id, preset = {}) {
     </div>` : '');
 }
 
+/** Vuelve a pintar los temas del examen con lo que hay en el formulario */
+function refreshExamTopics(form) {
+  const it = sheetCtx?.id ? S.item(sheetCtx.id) : null;
+  const draft = {
+    ...(it || {}),
+    subjectId: form.elements.subjectId.value,
+    kind: form.elements.kind.value,
+    exam: form.elements.exam?.checked,
+    compId: form.elements.compId?.value,
+    topicIds: new FormData(form).getAll('topicIds'),
+  };
+  if (it && draft.subjectId !== it.subjectId) draft.topicIds = [];
+  document.getElementById('exam-topics').innerHTML = examTopicsField(draft.subjectId, draft);
+}
+
 /** Casillas con los temas que entran en un examen */
 function examTopicsField(subjectId, it) {
   const s = S.subject(subjectId);
   const topics = s?.topics || [];
+  const area = it ? S.examArea({ ...it, subjectId }) : 'teoria';
   if (!topics.length) {
     return `<p class="hint">Cuando añadas el temario de la asignatura (Info → Temario) podrás marcar qué temas entran en este examen.</p>`;
   }
   const sel = new Set(it?.topicIds || []);
-  const auto = it && it.date && !sel.size ? new Set(SP.examTopics(it).map((t) => t.id)) : null;
+  const auto = it && it.date && !sel.size ? new Set(S.examTopics({ ...it, subjectId }).map((t) => t.id)) : null;
+  const groups = (area === 'practicas' ? ['practicas', 'teoria'] : ['teoria', 'practicas'])
+    .map((a) => [a, topics.filter((t) => S.topicArea(t) === a)])
+    .filter(([, l]) => l.length);
   return `
     <div class="field"><span>Temas que entran ${sel.size ? `<b class="muted">${sel.size} de ${topics.length}</b>` : ''}</span>
-      <div class="topic-checks">${topics.map((t) => `
-        <label class="tcheck"><input type="checkbox" name="topicIds" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}><span>${esc(t.name)}</span>${auto?.has(t.id) ? '<em>auto</em>' : ''}</label>`).join('')}
+      <div class="topic-checks">${groups.map(([a, list]) => `
+        ${groups.length > 1 ? `<div class="tc-group">${a === 'teoria' ? 'Teoría' : 'Prácticas'}</div>` : ''}
+        ${list.map((t) => `
+        <label class="tcheck"><input type="checkbox" name="topicIds" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}><span>${esc(t.name)}</span>${auto?.has(t.id) ? '<em>auto</em>' : ''}</label>`).join('')}`).join('')}
       </div>
     </div>
-    <p class="hint">Si no marcas ninguno, entran los temas que no están en exámenes anteriores de la asignatura${auto ? ' (los marcados como «auto»)' : ''}.</p>`;
+    <p class="hint">Si no marcas ninguno, entran los de ${area === 'practicas' ? 'prácticas' : 'teoría'} que no estén en otros exámenes${auto ? ' (los marcados «auto»)' : ''}.${area === 'practicas' && !topics.some((t) => S.topicArea(t) === 'practicas') ? ' Añade el temario de prácticas en Info → Temario.' : ''}</p>`;
 }
 
 /** Anual evaluada en todo el curso: sus pruebas se reparten por cuatrimestre */
@@ -3180,8 +3214,11 @@ const actions = {
     if (name === 'kind' && form.dataset.save === 'save-item') {
       const k = el.dataset.value;
       form.querySelector('.only-exam').hidden = k !== 'examen';
-      form.querySelector('.only-exam-topics').hidden = k !== 'examen';
-      form.querySelector('.only-deliv').hidden = !(k === 'practica' || k === 'entrega');
+      const pex = k === 'practica' && form.elements.exam.checked;
+      form.querySelector('.only-pexam').hidden = k !== 'practica';
+      form.querySelector('.only-exam-topics').hidden = !(k === 'examen' || pex);
+      form.querySelector('.only-deliv').hidden = !((k === 'practica' && !pex) || k === 'entrega');
+      refreshExamTopics(form);
       form.elements.title.placeholder = placeholderFor(k);
       // Ajusta el apartado al tipo si no se ha tocado
       const match = defaultComp(S.subject(form.elements.subjectId.value), k);
@@ -3430,7 +3467,8 @@ const actions = {
       weight: parseNum(d.weight) || 1,
       done: !!d.done || (g != null && d.kind !== 'examen'),
       notes: d.notes.trim(),
-      topicIds: d.kind === 'examen' ? new FormData(overlay.querySelector('form')).getAll('topicIds') : [],
+      exam: d.kind === 'practica' && !!d.exam,
+      topicIds: d.kind === 'examen' || (d.kind === 'practica' && d.exam) ? new FormData(overlay.querySelector('form')).getAll('topicIds') : [],
     });
     if (isNew) S.state.items.push(it);
     S.save();
@@ -3590,13 +3628,13 @@ const actions = {
   },
 
   // --- Plan de estudio ---
-  'paste-topics': (el) => openPasteTopics(el.dataset.id),
+  'paste-topics': (el) => openPasteTopics(el.dataset.id, el.dataset.area || 'teoria'),
   'save-topics': () => {
     const d = formData();
     const names = SP.parseSyllabus(d.text);
     if (!names.length) return toast('Pega al menos un tema');
     const s = S.subject(sheetCtx.id);
-    const n = SP.addTopics(s, names, parseNum(d.hours) || 3, !!d.replace);
+    const n = SP.addTopics(s, names, parseNum(d.hours) || 3, !!d.replace, d.area);
     closeOverlay();
     haptic('success');
     toast(n ? `${n} ${n === 1 ? 'tema añadido' : 'temas añadidos'}` : 'Esos temas ya estaban');
@@ -3609,6 +3647,7 @@ const actions = {
     if (!d.name.trim()) return toast('Ponle un nombre');
     t.name = d.name.trim();
     t.hours = Math.min(100, Math.max(0.25, parseNum(d.hours) || 3));
+    t.area = d.area === 'practicas' ? 'practicas' : 'teoria';
     St.setConf(t, +d.conf);
     S.save();
     closeOverlay();
@@ -3821,10 +3860,11 @@ const actions = {
     if (!name) return;
     const s = S.subject(form.dataset.id);
     s.topics = s.topics || [];
-    s.topics.push({ id: S.uid(), name, done: false });
+    const area = form.dataset.area === 'practicas' ? 'practicas' : 'teoria';
+    s.topics.push({ id: S.uid(), name, done: false, area });
     S.save();
     render();
-    app.querySelector('.topic-new input')?.focus();
+    app.querySelector(`.topic-new[data-area="${area}"] input`)?.focus();
   },
   'toggle-topic': (el) => {
     const s = subjectOf(el);
@@ -3983,6 +4023,13 @@ document.addEventListener('change', async (e) => {
   const f = t.dataset.field;
   const st = S.state.settings;
 
+  if (t.name === 'exam' && t.closest('form[data-save="save-item"]')) {
+    const form = t.closest('form');
+    form.querySelector('.only-exam-topics').hidden = !t.checked;
+    form.querySelector('.only-deliv').hidden = t.checked;
+    refreshExamTopics(form);
+    return;
+  }
   if (t.name === 'subjectId' && t.closest('form[data-save="save-block"]')) {
     document.getElementById('topic-sel').innerHTML = select('topicId', topicOptions(t.value), '');
     return;
@@ -4006,7 +4053,7 @@ document.addEventListener('change', async (e) => {
     const pickId = defaultComp(S.subject(t.value), kind);
     document.getElementById('comp-sel').innerHTML = select('compId', opts, pickId);
     form.querySelector('.only-annual-item').hidden = !annualNoSplit(t.value);
-    document.getElementById('exam-topics').innerHTML = examTopicsField(t.value, null);
+    refreshExamTopics(form);
     return;
   }
 

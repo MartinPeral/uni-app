@@ -98,7 +98,7 @@ export function buildContext() {
     L.push(...sp);
   }
   // Temas que entran en cada examen próximo
-  for (const ex of S.upcoming({ kinds: ['examen'], days: 60 }).slice(0, 6)) {
+  for (const ex of S.upcoming({ exams: true, days: 60 }).slice(0, 6)) {
     const ts = SP.examTopics(ex);
     if (ts.length) L.push(`TEMAS DE "${ex.title}" (${S.shortName(S.subject(ex.subjectId))}): ${ts.map((t) => `${t.name} [dominio ${St.confOf(t)}, ~${SP.topicHours(t)} h]`).join(', ')}.`);
   }

@@ -208,14 +208,17 @@ export const recentSessions = (n = 8) =>
  */
 export function todayPlan() {
   const tasks = [];
-  const exams = S.upcoming({ kinds: ['examen'], days: 30 });
+  const exams = S.upcoming({ exams: true, days: 30 });
   const seen = new Set();
   for (const ex of exams) {
     const s = S.subject(ex.subjectId);
-    if (!s || s.final || seen.has(s.id)) continue;
-    seen.add(s.id);
+    const key = `${ex.subjectId}|${S.examArea(ex)}`;
+    if (!s || s.final || seen.has(key)) continue;
+    seen.add(key);
     const daysLeft = S.daysUntil(ex.date);
-    const topics = s.topics || [];
+    // Los temas de ese examen; si no hay ninguno asignado, todos los de su parte
+    const own = S.examTopics(ex);
+    const topics = own.length ? own : (s.topics || []).filter((t) => S.topicArea(t) === S.examArea(ex));
     if (!topics.length) {
       tasks.push({ type: 'notopics', s, exam: ex, daysLeft, urgency: daysLeft });
       continue;

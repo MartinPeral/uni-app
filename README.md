@@ -85,7 +85,7 @@ Abre la carpeta en VS Code, clic derecho en `index.html` → **Open with Live Se
 
 ## Actualizarla
 
-Sube los cambios y cambia `CACHE = 'unilog-v13'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
+Sube los cambios y cambia `CACHE = 'unilog-v14'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
 
 ## Copias de seguridad
 
