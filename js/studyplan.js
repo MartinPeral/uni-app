@@ -42,7 +42,7 @@ export function parseSyllabus(text) {
 /** Añade temas a una asignatura sin repetir. Devuelve cuántos se han añadido */
 export function addTopics(s, names, hours, replace = false, area = 'teoria') {
   s.topics = s.topics || [];
-  if (replace) s.topics = s.topics.filter((t) => S.topicArea(t) !== area);
+  if (replace) s.topics = s.sharedTopics ? [] : s.topics.filter((t) => S.topicArea(t) !== area);
   const have = new Set(s.topics.map((t) => S.norm(t.name)));
   let n = 0;
   for (const name of names) {
@@ -63,7 +63,9 @@ export const examTopics = S.examTopics;
 /** Minutos que faltan para preparar un examen (según el dominio de cada tema) */
 export function examWork(exam) {
   const topics = examTopics(exam);
-  const units = topics.map((t) => ({ topic: t, min: Math.round(topicHours(t) * 60 * FACTOR[St.confOf(t)]) }));
+  const s = S.subject(exam.subjectId);
+  const share = s?.sharedTopics && S.examArea(exam) === 'practicas' ? 0.5 : 1;
+  const units = topics.map((t) => ({ topic: t, min: Math.round(topicHours(t) * 60 * FACTOR[St.confOf(t)] * share) }));
   return { topics, units, need: units.reduce((a, u) => a + u.min, 0) };
 }
 

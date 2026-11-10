@@ -218,7 +218,7 @@ export function todayPlan() {
     const daysLeft = S.daysUntil(ex.date);
     // Los temas de ese examen; si no hay ninguno asignado, todos los de su parte
     const own = S.examTopics(ex);
-    const topics = own.length ? own : (s.topics || []).filter((t) => S.topicArea(t) === S.examArea(ex));
+    const topics = own.length ? own : S.topicsFor(s, S.examArea(ex));
     if (!topics.length) {
       tasks.push({ type: 'notopics', s, exam: ex, daysLeft, urgency: daysLeft });
       continue;

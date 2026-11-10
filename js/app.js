@@ -9,7 +9,7 @@ import * as Pl from './plan.js';
 import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.2';
+const APP_VERSION = '3.3';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -1024,12 +1024,13 @@ function infoTab(s) {
 
     <h2 class="section-title">Temario ${topics.length ? `<span class="count">${done}/${topics.length}</span>` : ''}</h2>
     ${topics.length ? `<div class="progress"><i style="width:${(done / topics.length) * 100}%;background:${subjColor(s)}"></i></div>` : ''}
-    ${['teoria', 'practicas'].map((area) => {
-      const list = topics.filter((t) => S.topicArea(t) === area);
+    <label class="check shared-check"><input type="checkbox" data-field="shared-topics" data-id="${s.id}" ${s.sharedTopics ? 'checked' : ''}><span>Teoría y prácticas tienen el mismo temario</span></label>
+    ${(s.sharedTopics ? ['todo'] : ['teoria', 'practicas']).map((area) => {
+      const list = area === 'todo' ? topics : topics.filter((t) => S.topicArea(t) === area);
       return `
       <div class="topic-group ${area}">
-        <div class="tg-head"><b>${area === 'teoria' ? 'Teoría' : 'Prácticas'}</b><span>${list.length ? `${list.length} temas · ${fmt(list.reduce((x, t) => x + SP.topicHours(t), 0), 1)} h` : 'Sin temas'}</span>
-          <button class="link" data-action="paste-topics" data-id="${s.id}" data-area="${area}">${I.list} Pegar lista</button></div>
+        <div class="tg-head"><b>${area === 'todo' ? 'Teoría y prácticas' : area === 'teoria' ? 'Teoría' : 'Prácticas'}</b><span>${list.length ? `${list.length} temas · ${fmt(list.reduce((x, t) => x + SP.topicHours(t), 0), 1)} h` : 'Sin temas'}</span>
+          <button class="link" data-action="paste-topics" data-id="${s.id}" data-area="${area === 'todo' ? 'teoria' : area}">${I.list} Pegar lista</button></div>
         <div class="card flush topics">
           ${list.map((t) => `
             <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
@@ -1037,14 +1038,14 @@ function infoTab(s) {
               <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${fmt(SP.topicHours(t), 1)} h</small></button>
               <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
             </div>`).join('')}
-          <form class="topic-new" data-save="add-topic" data-id="${s.id}" data-area="${area}">
-            <input class="input" name="topic" placeholder="${area === 'teoria' ? 'Añadir tema de teoría…' : 'Añadir práctica o tema de prácticas…'}" enterkeyhint="done" autocomplete="off">
+          <form class="topic-new" data-save="add-topic" data-id="${s.id}" data-area="${area === 'todo' ? 'teoria' : area}">
+            <input class="input" name="topic" placeholder="${area === 'todo' ? 'Añadir tema…' : area === 'teoria' ? 'Añadir tema de teoría…' : 'Añadir práctica o tema de prácticas…'}" enterkeyhint="done" autocomplete="off">
             <button class="icon-btn sm" type="submit" aria-label="Añadir">${I.plusSm}</button>
           </form>
         </div>
       </div>`;
     }).join('')}
-    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas y el nombre para cambiar sus horas. Los temas de prácticas son para los exámenes y controles de prácticas.</p>
+    <p class="hint">Toca las rayitas de cada tema para decir cuánto lo dominas y el nombre para cambiar sus horas. ${s.sharedTopics ? 'Los exámenes de teoría y los de prácticas usan estos mismos temas.' : 'Los temas de prácticas son para los exámenes y controles de prácticas.'}</p>
 
     <h2 class="section-title">Enlaces</h2>
     ${(s.links || []).length ? `<div class="card flush">${s.links.map((l) => `
@@ -2012,11 +2013,11 @@ function viewStudyPlan() {
   const syllabus = subs.map((s) => {
     const n = (s.topics || []).length;
     const h = (s.topics || []).reduce((a, t) => a + SP.topicHours(t), 0);
-    const np = (s.topics || []).filter((t) => S.topicArea(t) === 'practicas').length;
+    const np = s.sharedTopics ? 0 : (s.topics || []).filter((t) => S.topicArea(t) === 'practicas').length;
     return `
       <div class="sp-sub" style="--c:${subjColor(s)}">
         <span class="row-text"><strong><b class="sdot"></b>${esc(s.name)}</strong>
-          <small class="${n ? '' : 'text-bad'}">${n ? `${n - np} de teoría${np ? ` · ${np} de prácticas` : ''} · ~${fmt(h, 1)} h` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
+          <small class="${n ? '' : 'text-bad'}">${n ? `${s.sharedTopics ? `${n} temas (teoría y prácticas)` : `${n - np} de teoría${np ? ` · ${np} de prácticas` : ''}`} · ~${fmt(h, 1)} h` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
         <button class="btn sm ${n ? 'ghost' : 'primary'}" data-action="paste-topics" data-id="${s.id}" data-area="${n && !np ? 'practicas' : 'teoria'}">${n ? 'Añadir' : 'Pegar temario'}</button>
       </div>`;
   }).join('');
@@ -2101,14 +2102,14 @@ function openPasteTopics(id, area = 'teoria') {
   sheetCtx = { id };
   const count = (a) => (s.topics || []).filter((t) => S.topicArea(t) === a).length;
   openSheet(`Temario de ${esc(S.shortName(s))}`, `
-    <div class="field"><span>Es el temario de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], area)}</div>
+    ${s.sharedTopics ? '<input type="hidden" name="area" value="teoria">' : `<div class="field"><span>Es el temario de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], area)}</div>`}
     <p class="hint">Pega la lista de temas (o de prácticas), uno por línea. Puedes copiarla del PDF de la guía docente o de la Enseñanza Virtual: quito solo los números y los «Tema 1.».</p>
     <textarea class="input area big-area" name="text" placeholder="Tema 1. Introducción a los grafos&#10;Tema 2. Recorridos en anchura y profundidad&#10;Tema 3. Caminos mínimos&#10;…"></textarea>
     <div class="two">
       ${field('Horas por tema (aprox.)', text('hours', '3', 'inputmode="decimal"'))}
       <div class="field"><span>Vista previa</span><div class="paste-count" id="paste-count">0 temas</div></div>
     </div>
-    ${(s.topics || []).length ? `<label class="check"><input type="checkbox" name="replace"><span>Sustituir los temas que ya tiene en esa parte (teoría: ${count('teoria')}, prácticas: ${count('practicas')})</span></label>` : ''}`,
+    ${(s.topics || []).length ? `<label class="check"><input type="checkbox" name="replace"><span>${s.sharedTopics ? `Sustituir los ${s.topics.length} temas que ya tiene` : `Sustituir los temas que ya tiene en esa parte (teoría: ${count('teoria')}, prácticas: ${count('practicas')})`}</span></label>` : ''}`,
   'save-topics');
 }
 
@@ -2118,7 +2119,7 @@ function openTopicSheet(subjectId, topicId) {
   sheetCtx = { subjectId, topicId };
   openSheet('Tema', `
     ${field('Nombre', text('name', t.name, 'autocapitalize="sentences"'))}
-    <div class="field"><span>Es de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], S.topicArea(t))}</div>
+    ${S.subject(subjectId)?.sharedTopics ? `<input type="hidden" name="area" value="${S.topicArea(t)}">` : `<div class="field"><span>Es de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], S.topicArea(t))}</div>`}
     ${field('Horas que le calculas', text('hours', fmt(SP.topicHours(t), 1), 'inputmode="decimal"'))}
     <div class="field"><span>Cómo lo llevas</span>${segPick('conf', St.CONF.map((c, i) => [i, c.short]), St.confOf(t))}</div>
     <p class="hint">El plan reparte las horas según lo que lo domines: un tema «bien» necesita menos de la mitad que uno sin empezar.</p>`, 'save-topic');
@@ -2788,7 +2789,7 @@ function examTopicsField(subjectId, it) {
   const sel = new Set(it?.topicIds || []);
   const auto = it && it.date && !sel.size ? new Set(S.examTopics({ ...it, subjectId }).map((t) => t.id)) : null;
   const groups = (area === 'practicas' ? ['practicas', 'teoria'] : ['teoria', 'practicas'])
-    .map((a) => [a, topics.filter((t) => S.topicArea(t) === a)])
+    .map((a) => [a, s.sharedTopics ? (a === area ? topics : []) : topics.filter((t) => S.topicArea(t) === a)])
     .filter(([, l]) => l.length);
   return `
     <div class="field"><span>Temas que entran ${sel.size ? `<b class="muted">${sel.size} de ${topics.length}</b>` : ''}</span>
@@ -2798,7 +2799,7 @@ function examTopicsField(subjectId, it) {
         <label class="tcheck"><input type="checkbox" name="topicIds" value="${t.id}" ${sel.has(t.id) ? 'checked' : ''}><span>${esc(t.name)}</span>${auto?.has(t.id) ? '<em>auto</em>' : ''}</label>`).join('')}`).join('')}
       </div>
     </div>
-    <p class="hint">Si no marcas ninguno, entran los de ${area === 'practicas' ? 'prácticas' : 'teoría'} que no estén en otros exámenes${auto ? ' (los marcados «auto»)' : ''}.${area === 'practicas' && !topics.some((t) => S.topicArea(t) === 'practicas') ? ' Añade el temario de prácticas en Info → Temario.' : ''}</p>`;
+    <p class="hint">Si no marcas ninguno, entran los de ${area === 'practicas' ? 'prácticas' : 'teoría'} que no estén en otros exámenes${auto ? ' (los marcados «auto»)' : ''}.${area === 'practicas' && !S.topicsFor(s, 'practicas').length ? ' Añade el temario de prácticas en Info → Temario, o marca que teoría y prácticas tienen el mismo.' : ''}</p>`;
 }
 
 /** Anual evaluada en todo el curso: sus pruebas se reparten por cuatrimestre */
@@ -4028,6 +4029,15 @@ document.addEventListener('change', async (e) => {
     form.querySelector('.only-exam-topics').hidden = !t.checked;
     form.querySelector('.only-deliv').hidden = t.checked;
     refreshExamTopics(form);
+    return;
+  }
+  if (t.dataset.field === 'shared-topics') {
+    const sub = S.subject(t.dataset.id);
+    sub.sharedTopics = t.checked;
+    S.save();
+    haptic();
+    toast(t.checked ? 'Teoría y prácticas usan el mismo temario' : 'Temario de teoría y de prácticas por separado');
+    render();
     return;
   }
   if (t.name === 'subjectId' && t.closest('form[data-save="save-block"]')) {

@@ -1407,3 +1407,5 @@ body.no-tabs .composer { bottom: 0; padding-bottom: calc(var(--safe-bottom) + 10
   color: var(--a-practicas); background: color-mix(in srgb, var(--a-practicas) 15%, transparent);
   border-radius: 5px; padding: 1px 5px; vertical-align: 1px;
 }
+.shared-check { margin: -2px 0 12px; font-size: 15px; }
+.topic-group.todo { --a: var(--accent); }

@@ -295,6 +295,10 @@ export function examArea(i) {
 /** Teoría o prácticas: de qué parte es un tema */
 export const topicArea = (t) => (t.area === 'practicas' ? 'practicas' : 'teoria');
 
+/** Temas de una parte. Si teoría y prácticas comparten temario, son todos */
+export const topicsFor = (s, area) =>
+  (s?.sharedTopics ? (s.topics || []) : (s?.topics || []).filter((t) => topicArea(t) === area));
+
 export function isPending(it) {
   if (it.kind === 'examen' || it.kind === 'otro' || it.exam) return it.grade == null;
   return !it.done && it.grade == null;
@@ -329,7 +333,7 @@ export function examTopics(exam) {
   const all = s.topics || [];
   if (exam.topicIds?.length) return all.filter((t) => exam.topicIds.includes(t.id));
   const area = examArea(exam);
-  const topics = all.filter((t) => topicArea(t) === area);
+  const topics = topicsFor(s, area);
   if (!isPartialExam(exam)) return topics;
   const exams = examsOfSubject(s).filter((e) => examArea(e) === area);
   const claimed = new Set(exams.flatMap((e) => e.topicIds || []));
@@ -932,6 +936,7 @@ export function applyPreset(s, preset) {
     // Evaluación de todo el curso (no una nota por cuatrimestre)
     s.term = 'A';
     s.split = false;
+    s.sharedTopics = true;
     const ids = {};
     s.comps = preset.comps.map(({ key, replacesKey, ...c }) => {
       const comp = { id: uid(), ...c };
