@@ -120,8 +120,11 @@ const defaults = () => ({
     passMark: 5,
     term: 'auto',
     theme: 'auto',
+    aiUrl: '',
   },
   study: studyDefaults(),
+  plan: { days: {}, start: '09:00', end: '22:00' }, // planning diario
+  chat: [], // conversación con el tutor IA
   demo: false,
 });
 
@@ -143,6 +146,8 @@ const merge = (d, data) => ({
   ...data,
   settings: { ...d.settings, ...data.settings },
   study: { ...d.study, ...data.study },
+  plan: { ...d.plan, ...data.plan, days: { ...(data.plan?.days || {}) } },
+  chat: Array.isArray(data.chat) ? data.chat : [],
 });
 
 function load() {

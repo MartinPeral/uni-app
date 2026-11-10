@@ -2,6 +2,23 @@
 
 App web instalable (PWA) para organizar la universidad: asignaturas, horario, exámenes, prácticas, entregas, métodos de evaluación y notas. Funciona sin conexión y los datos se guardan en el propio móvil.
 
+## Novedades de la versión 3.0 (planning y tutor IA)
+
+- **Planning diario** (Hoy → Tu día → Ver todo): tus clases y tus bloques de estudio, tareas, descansos y cosas personales en una línea del tiempo, con los huecos libres y la hora actual. Tareas sin hora. Desliza para marcar hecho o borrar, y para cambiar de día.
+- **Organízame el día:** rellena los huecos libres con lo que más urge (entregas, temas flojos antes de cada examen, repasar las clases del día) y mete descansos. Funciona sin internet.
+- **Guía en Hoy:** qué toca ahora y qué viene después, con botón para empezar el pomodoro.
+- **Tutor IA:** chat que conoce tus clases, planning, exámenes, notas y temas. Te organiza el día (con un botón para añadir su plan al planning) y te dice qué hacer ahora.
+
+### Servidor del tutor IA
+
+Usa el mismo Cloudflare Worker gratuito que GymLog (`gymlog-ai`), ampliado para atender a las dos apps. Para activarlo:
+
+1. Panel de Cloudflare → **Workers & Pages** → **gymlog-ai** → **Edit code**.
+2. Borra todo, pega `worker/worker.js` de este repositorio y pulsa **Deploy**.
+3. GymLog sigue funcionando igual; el binding **AI** no cambia.
+
+En UniLog → Ajustes → Tutor IA → **Probar el tutor** para comprobarlo.
+
 ## Novedades de la versión 2.0
 
 - **Gestos:** desliza una fecha a la derecha para marcarla entregada o ponerle nota, y a la izquierda para borrarla (con *Deshacer*). Mantén pulsada una asignatura o una fecha para ver su menú. Desliza el horario semanal o el calendario para cambiar de semana o de mes.
@@ -34,8 +51,11 @@ uni-app/
 │   ├── app.js            Pantallas, navegación y botones
 │   ├── store.js          Datos y cálculos (notas, expediente, horario, .ics)
 │   ├── study.js          Estudio: pomodoro, sesiones y plan del día
+│   ├── plan.js           Planning diario y organizador automático
+│   ├── ai.js             Tutor IA: resumen de datos y llamada al servidor
 │   └── fx.js             Gestos, vibración, animaciones y confeti
-└── icons/                Iconos de la app
+├── icons/                Iconos de la app
+└── worker/worker.js      Servidor de IA (Cloudflare Worker, compartido con GymLog)
 ```
 
 ## Cómo se calcula la nota
@@ -58,7 +78,7 @@ Abre la carpeta en VS Code, clic derecho en `index.html` → **Open with Live Se
 
 ## Actualizarla
 
-Sube los cambios y cambia `CACHE = 'unilog-v11'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
+Sube los cambios y cambia `CACHE = 'unilog-v12'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
 
 ## Copias de seguridad
 

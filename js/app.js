@@ -5,8 +5,10 @@
 import * as S from './store.js';
 import * as St from './study.js';
 import { haptic, countUp, confetti, burstFrom, onGestures } from './fx.js';
+import * as Pl from './plan.js';
+import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '2.5';
+const APP_VERSION = '3.0';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -102,6 +104,7 @@ const I = {
   practica: svg('<path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 006 21h12a1.7 1.7 0 001.5-2.5L14 9V3"/><path d="M7 15h10"/>', 'width="18" height="18"'),
   entrega: svg('<path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/>', 'width="18" height="18"'),
   otro: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/>', 'width="18" height="18"'),
+  send: svg('<path d="M12 19V5M5 12l7-7 7 7"/>', 'width="20" height="20" stroke-width="2.6"'),
   undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 010 10h-3"/>', 'width="18" height="18"'),
   play: svg('<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>', 'width="18" height="18"'),
   playBig: svg('<path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/>', 'width="22" height="22"'),
@@ -134,8 +137,10 @@ const TAB_OF = {
   agenda: 'agenda',
   notas: 'notas',
   estudio: 'estudio',
+  plan: 'inicio',
+  tutor: 'inicio',
 };
-const DEPTH = { asignatura: 1, ajustes: 1 };
+const DEPTH = { asignatura: 1, ajustes: 1, plan: 1, tutor: 2 };
 let enterTimer;
 const NO_TABS = ['ajustes'];
 
@@ -151,6 +156,8 @@ function render() {
     notas: viewRecord,
     ajustes: viewSettings,
     estudio: viewStudy,
+    plan: viewPlan,
+    tutor: viewTutor,
   };
   const view = views[r.name];
   if (!view) return go('#/inicio');
@@ -526,9 +533,10 @@ function viewHome() {
 
   return `${head}
     ${S.state.demo ? `<div class="demo-note">${I.sparkle}<span>Estás viendo datos de ejemplo.</span><button class="btn sm" data-action="clear-demo">Empezar de cero</button></div>` : ''}
-    ${nowCard()}
+    ${Pl.dayBlocks(S.ymd()).length ? '' : nowCard()}
+    ${dayCard()}
+    ${tutorCard()}
     ${studyHomeCard()}
-    ${todayList()}
     ${examCards()}
     ${pendingList()}
     ${subjectsGlance()}
@@ -1715,6 +1723,356 @@ function removeSession(id) {
 }
 
 // =============================================================
+//  PLANNING DIARIO
+// =============================================================
+
+let planDate = S.ymd();
+const M = S.minutes;
+const BI = {
+  study: svg('<path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5z"/><path d="M8 7h8M8 11h6"/>', 'width="16" height="16"'),
+  task: svg('<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V5a2 2 0 012-2h9"/>', 'width="16" height="16"'),
+  break: svg('<path d="M17 8h1a4 4 0 010 8h-1"/><path d="M3 8h14v9a4 4 0 01-4 4H7a4 4 0 01-4-4z"/><path d="M6 1v3M10 1v3M14 1v3"/>', 'width="16" height="16"'),
+  personal: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>', 'width="16" height="16"'),
+  class: svg('<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/>', 'width="16" height="16"'),
+};
+
+const blockColor = (b) => {
+  const s = S.subject(b.subjectId);
+  if (b.kind === 'break') return 'var(--good)';
+  if (b.kind === 'personal') return 'var(--muted)';
+  if (s) return subjColor(s);
+  return b.kind === 'task' ? 'var(--k-entrega)' : 'var(--accent)';
+};
+
+/** Fecha de un bloque guardado (para los gestos) */
+function blockDate(id) {
+  for (const [d, v] of Object.entries(S.state.plan.days)) if (v.blocks?.some((b) => b.id === id)) return d;
+  return planDate;
+}
+
+function dayLabel(date) {
+  const n = S.daysUntil(date);
+  if (n === 0) return 'Hoy';
+  if (n === 1) return 'Mañana';
+  if (n === -1) return 'Ayer';
+  return cap(new Intl.DateTimeFormat('es-ES', { weekday: 'long' }).format(S.toDate(date)));
+}
+
+function blockRow(b, date, nowM) {
+  const s = S.subject(b.subjectId);
+  const today = S.ymd();
+  const isNow = date === today && b.end && nowM >= M(b.start) && nowM < M(b.end);
+  const past = date < today || (date === today && b.end && M(b.end) <= nowM);
+  if (b.kind === 'class') {
+    return `
+      <a class="pb-row class ${S.slotArea(b.slotType)} ${isNow ? 'now' : ''} ${past ? 'past' : ''}" href="#/asignatura/${b.subjectId}" style="--c:${subjColor(s)}">
+        <span class="pb-time"><b>${b.start}</b><small>${b.end}</small></span>
+        <span class="pb-bar"></span>
+        <span class="row-text"><strong>${esc(s?.name || b.title)}</strong><small>Clase de ${esc((b.slotType || '').toLowerCase())}${b.room ? ' · ' + esc(b.room) : ''}</small></span>
+        <span class="pb-tag">${BI.class}</span>
+      </a>`;
+  }
+  const dur = b.start && b.end ? M(b.end) - M(b.start) : null;
+  const tp = St.topicOf(b.subjectId, b.topicId);
+  const meta = [Pl.KINDS[b.kind]?.label, s && !b.title.includes(S.shortName(s)) ? S.shortName(s) : '', tp && !b.title.includes(tp.name) ? tp.name : '', dur ? mins(dur) : '']
+    .filter(Boolean).map(esc).join(' · ');
+  return `
+    <div class="row-item swipe pb-swipe" data-id="${b.id}" data-right="block-done" data-left="del-block" data-left-out="1" style="--c:${blockColor(b)}">
+      <div class="swipe-bg"><span class="sw-right done">${I.check} ${b.done ? 'Pendiente' : 'Hecho'}</span><span class="sw-left">Eliminar ${I.trash}</span></div>
+      <div class="row-slide pb-row ${b.kind} ${b.done ? 'done' : ''} ${isNow ? 'now' : ''} ${past && !b.done ? 'past' : ''}">
+        <span class="pb-time">${b.start ? `<b>${b.start}</b><small>${b.end || ''}</small>` : `<span class="pb-ic">${BI[b.kind] || BI.task}</span>`}</span>
+        <span class="pb-bar"></span>
+        <button class="row-text" data-action="edit-block" data-id="${b.id}"><strong>${esc(b.title)}</strong><small>${meta}</small></button>
+        ${b.kind === 'study' && date === today && !b.done ? `<button class="icon-btn ghost sm" data-action="block-study" data-id="${b.id}" aria-label="Empezar a estudiar">${I.play}</button>` : ''}
+        <button class="tick ${b.done ? 'on' : ''}" data-action="block-toggle" data-id="${b.id}" aria-label="${b.done ? 'Marcar pendiente' : 'Marcar hecho'}">${I.check}</button>
+      </div>
+    </div>`;
+}
+
+/** Línea del tiempo del día con huecos libres y la hora actual */
+function timelineHTML(date, { compact = false, from = null } = {}) {
+  const today = S.ymd();
+  const now = new Date();
+  const nowM = now.getHours() * 60 + now.getMinutes();
+  let tl = Pl.timeline(date);
+  if (from != null) tl = tl.filter((b) => !b.end || M(b.end) > from);
+  const entries = tl.map((b) => ({ t: M(b.start), html: blockRow(b, date, nowM) }));
+  if (!compact) {
+    for (const [a, b] of Pl.freeSlots(date, 30)) {
+      entries.push({ t: a, gap: true, html: `
+        <button class="pb-gap" data-action="new-block" data-start="${Pl.hhmm(a)}" data-end="${Pl.hhmm(Math.min(b, a + 60))}">
+          <span>Hueco libre ${Pl.hhmm(a)}–${Pl.hhmm(b)} · ${mins(b - a)}</span><b>${I.plusSm} Añadir</b>
+        </button>` });
+    }
+  }
+  if (date === today && !compact) entries.push({ t: nowM, now: true, html: `<div class="pb-now"><span>${Pl.hhmm(nowM)}</span></div>` });
+  entries.sort((x, y) => x.t - y.t || (x.now ? -1 : y.now ? 1 : x.gap ? -1 : 0));
+  return entries.map((e) => e.html).join('');
+}
+
+function viewPlan() {
+  const date = planDate;
+  const today = S.ymd();
+  const tl = Pl.timeline(date);
+  const un = Pl.untimed(date);
+  const pr = Pl.progress(date);
+  const own = Pl.dayBlocks(date);
+  const studyMin = own.filter((b) => b.kind === 'study' && b.start && b.end).reduce((a, b) => a + M(b.end) - M(b.start), 0);
+  return `
+    ${topBar('Planning', { back: '#/inicio', action: `<button class="icon-btn" data-action="go-tutor" aria-label="Tutor IA">${I.sparkle}</button>` })}
+    <div class="wk-nav">
+      <button class="icon-btn sm" data-action="plan-day" data-v="-1" aria-label="Día anterior">${I.left}</button>
+      <button class="wk-label" data-action="plan-day" data-v="0"><strong>${dayLabel(date)}</strong><small>${longDate(date)}</small></button>
+      <button class="icon-btn sm" data-action="plan-day" data-v="1" aria-label="Día siguiente">${I.right}</button>
+    </div>
+
+    ${pr.total ? `
+      <div class="plan-sum">
+        <div class="progress"><i style="width:${(pr.done / pr.total) * 100}%;background:var(--good)"></i></div>
+        <span>${pr.done} de ${pr.total} hechos${studyMin ? ` · ${mins(studyMin)} de estudio planificado` : ''}</span>
+      </div>` : ''}
+
+    <div class="two plan-actions">
+      <button class="btn primary" data-action="plan-auto">${I.wand} Organízame el día</button>
+      <button class="btn" data-action="plan-ai">${I.sparkle} Pedir a la IA</button>
+    </div>
+    <p class="hint">Organízame rellena los huecos con lo que más urge (exámenes, temas flojos, entregas y repasar las clases). Si lo vuelves a pulsar, rehace lo que no has marcado como hecho.</p>
+
+    <div class="card flush pb-list mt" data-swipe-nav="plan">
+      ${tl.length || Pl.freeSlots(date, 30).length ? timelineHTML(date) : `<p class="pad muted center">Este día ya ha pasado.</p>`}
+    </div>
+    <p class="hint">Desliza un bloque a la derecha para marcarlo hecho y a la izquierda para borrarlo. Desliza la lista para cambiar de día.</p>
+
+    <h2 class="section-title">Tareas sin hora ${un.length ? `<span class="count">${un.filter((b) => b.done).length}/${un.length}</span>` : ''}</h2>
+    <div class="card flush">
+      ${un.map((b) => blockRow(b, date, -1)).join('')}
+      <form class="topic-new" data-save="add-task">
+        <input class="input" name="task" placeholder="Añadir tarea… (ej. Imprimir apuntes)" enterkeyhint="done" autocomplete="off">
+        <button class="icon-btn sm" type="submit" aria-label="Añadir tarea">${I.plusSm}</button>
+      </form>
+    </div>
+    <button class="btn ghost block mt" data-action="new-block">${I.plusSm} Añadir bloque con hora</button>`;
+}
+
+/** Tarjeta "Tu día" en Hoy: qué toca ahora y lo siguiente */
+function dayCard() {
+  const today = S.ymd();
+  const own = Pl.dayBlocks(today);
+  const { cur, next, m } = Pl.nowAndNext(today);
+  if (!own.length) {
+    return `
+      <div class="card plan-start">
+        <div class="ps-head"><span class="opt-ic">${I.wand}</span><div><strong>Planifica tu día</strong><small>Te organizo los huecos entre clases con lo que más urge.</small></div></div>
+        <div class="two mt">
+          <button class="btn primary" data-action="plan-auto" data-today="1">Organízamelo</button>
+          <button class="btn" data-action="plan-ai" data-today="1">${I.sparkle} Con la IA</button>
+        </div>
+        <a class="link center-link small-link" href="#/plan" data-action="plan-open">Lo hago yo</a>
+      </div>`;
+  }
+  const guideB = cur || next;
+  const s = guideB ? S.subject(guideB.subjectId) : null;
+  const guide = guideB ? `
+    <div class="guide" style="--c:${guideB.kind === 'class' ? subjColor(s) : blockColor(guideB)}">
+      <span class="guide-label ${cur ? 'live' : ''}">${cur ? `Ahora · hasta las ${cur.end}` : `Siguiente · ${M(next.start) - m < 60 ? `en ${M(next.start) - m} min` : `a las ${next.start}`}`}</span>
+      <strong>${esc(guideB.kind === 'class' ? `Clase de ${s?.name || guideB.title}` : guideB.title)}</strong>
+      ${cur && cur.kind === 'study' ? `<button class="btn sm primary mt" data-action="block-study" data-id="${cur.id}">${I.play} Empezar pomodoro</button>` : ''}
+      ${cur && cur.kind !== 'study' && cur.kind !== 'class' ? `<button class="btn sm mt" data-action="block-toggle" data-id="${cur.id}">${I.check} Hecho</button>` : ''}
+    </div>` : `
+    <div class="guide done"><span class="guide-label">Planning de hoy</span><strong>¡Has terminado lo que tenías! 🎉</strong></div>`;
+  const pr = Pl.progress(today);
+  const rest = timelineHTML(today, { compact: true, from: m }).trim();
+  return `
+    <h2 class="section-title">Tu día <span class="count">${pr.done}/${pr.total}</span><a class="link right" href="#/plan" data-action="plan-open">Ver todo</a></h2>
+    <div class="card day-card">
+      ${guide}
+      ${rest ? `<div class="pb-list compact">${rest}</div>` : ''}
+    </div>`;
+}
+
+function tutorCard() {
+  return `
+    <a class="card tutor-cta" href="#/tutor">
+      <span class="coach-ico">${I.sparkle}</span>
+      <span class="row-text"><strong>Tu tutor IA</strong><small>Te organiza el día y te dice qué estudiar ahora</small></span>
+      ${I.chevron}
+    </a>`;
+}
+
+// --- Hoja de un bloque ---
+
+function topicOptions(subjectId) {
+  const s = S.subject(subjectId);
+  return [['', 'Ningún tema'], ...((s?.topics || []).map((t) => [t.id, `${t.name} (${St.CONF[St.confOf(t)].short.toLowerCase()})`]))];
+}
+
+function openBlockSheet(id, preset = {}) {
+  const date = id ? blockDate(id) : planDate;
+  const b = id ? Pl.block(date, id) : Pl.newBlock(preset);
+  sheetCtx = { id, date };
+  const subs = [['', 'Ninguna'], ...S.activeSubjects().map((x) => [x.id, x.name])];
+  openSheet(id ? 'Editar bloque' : 'Nuevo bloque', `
+    <div class="field"><span>Tipo</span>${segPick('kind', Object.entries(Pl.KINDS).map(([k, v]) => [k, v.label]), b.kind)}</div>
+    ${field('Qué vas a hacer', text('title', b.title, 'placeholder="Ej. Ejercicios de grafos" autocapitalize="sentences"'))}
+    ${field('Asignatura', select('subjectId', subs, b.subjectId))}
+    ${field('Tema', `<span id="topic-sel">${select('topicId', topicOptions(b.subjectId), b.topicId)}</span>`)}
+    <div class="two">
+      ${field('Empieza', `<input class="input" type="time" name="start" value="${esc(b.start)}">`)}
+      ${field('Termina', `<input class="input" type="time" name="end" value="${esc(b.end)}">`)}
+    </div>
+    <p class="hint">Sin hora queda como tarea del día.</p>
+    <label class="check"><input type="checkbox" name="done" ${b.done ? 'checked' : ''}><span>Hecho</span></label>`,
+  'save-block',
+  id ? `<button class="btn text-danger block mt" type="button" data-action="del-block" data-id="${id}">${I.trash} Eliminar</button>` : '');
+}
+
+function toggleBlock(id, fromEl) {
+  const date = blockDate(id);
+  const b = Pl.block(date, id);
+  if (!b) return;
+  b.done = !b.done;
+  S.save();
+  const r = fromEl?.getBoundingClientRect();
+  haptic(b.done ? 'success' : 'light');
+  render();
+  if (b.done && r) confetti({ x: r.left + r.width / 2, y: r.top + r.height / 2, power: 0.3 });
+  const pr = Pl.progress(date);
+  if (b.done && pr.total > 1 && pr.done === pr.total) {
+    toast('¡Día completado! 🎉');
+    confetti({ power: 1.2 });
+  }
+}
+
+function removeBlockUndo(id) {
+  const r = Pl.removeBlock(blockDate(id), id);
+  if (!r) return;
+  haptic();
+  render();
+  undoable(`"${r.b.title}" eliminado`, () => Pl.restoreBlock(r));
+}
+
+function runAutoPlan(date) {
+  const res = Pl.autoPlan(date);
+  planDate = date;
+  haptic(res.added.length ? 'success' : 'heavy');
+  if (route().name !== 'plan') go('#/plan'); else render();
+  if (!res.added.length) {
+    toast('No hay huecos libres o nada pendiente que meter');
+    return;
+  }
+  const n = res.added.filter((b) => b.kind !== 'break').length;
+  undoable(`${n} ${n === 1 ? 'bloque añadido' : 'bloques añadidos'}`, () => Pl.undoAuto(date, res));
+}
+
+// =============================================================
+//  TUTOR IA
+// =============================================================
+
+let aiBusy = false;
+let aiError = null;
+let aiOutdated = false;
+
+const TUTOR_SUGGESTIONS = [
+  'Organízame el día de hoy',
+  '¿Qué estudio ahora?',
+  '¿Cómo voy en cada asignatura?',
+  'Hazme un plan para mi próximo examen',
+  'Estoy agobiado, ¿por dónde empiezo?',
+];
+
+function planCard(plan, i, applied) {
+  const date = plan.date;
+  return `
+    <div class="ai-plan">
+      <div class="ai-plan-head">${I.cal}<strong>Plan para ${dayLabel(date).toLowerCase() === 'hoy' ? 'hoy' : dayLabel(date).toLowerCase()}</strong></div>
+      ${plan.blocks.map((b) => {
+        const s = S.subject(b.subjectId);
+        return `<div class="ai-plan-row" style="--c:${blockColor(b)}"><span>${b.start}–${b.end}</span><b>${esc(b.title)}</b>${s ? `<em>${esc(S.shortName(s))}</em>` : ''}</div>`;
+      }).join('')}
+      <button class="btn sm ${applied ? '' : 'primary'} block mt" data-action="ai-apply" data-i="${i}" ${applied ? 'disabled' : ''}>
+        ${applied ? `${I.check} Añadido al planning` : `${I.plusSm} Añadir a mi planning`}
+      </button>
+    </div>`;
+}
+
+function chatMessage(m, i) {
+  if (m.role === 'user') return `<div class="msg user"><div class="bubble">${esc(m.content)}</div></div>`;
+  const { text, plan } = splitPlan(m.content);
+  return `
+    <div class="msg bot"><span class="bot-ico">${I.sparkle}</span>
+      <div class="bubble">${renderMarkdown(text)}${plan ? planCard(plan, i, m.applied) : ''}</div>
+    </div>`;
+}
+
+let tutorBack = '#/inicio';
+
+function viewTutor() {
+  const chat = S.state.chat;
+  const empty = !chat.length;
+  return `
+    ${topBar('Tutor IA', {
+      back: tutorBack,
+      action: chat.length ? `<button class="icon-btn" data-action="ai-clear" aria-label="Borrar conversación">${I.trash}</button>` : '',
+    })}
+    ${empty ? `
+      <div class="coach-hello">
+        <span class="hello-ic">${I.sparkle}</span>
+        <h2>¿Qué hacemos hoy${S.state.settings.name ? `, ${esc(S.state.settings.name)}` : ''}?</h2>
+        <p class="hint">Conozco tus clases, tu planning, tus exámenes y entregas, tus notas y cómo llevas cada tema. Te organizo el día y te voy guiando.</p>
+      </div>` : ''}
+    <div class="chat">
+      ${chat.map(chatMessage).join('')}
+      ${aiBusy ? `<div class="msg bot"><span class="bot-ico">${I.sparkle}</span><div class="bubble typing"><i></i><i></i><i></i></div></div>` : ''}
+      ${aiError ? `<div class="chat-error"><span>${esc(aiError)}</span>${aiOutdated ? '<a class="btn sm" href="#/ajustes">Ver pasos</a>' : '<button class="btn sm" data-action="ai-retry">Reintentar</button>'}</div>` : ''}
+    </div>
+    ${!aiBusy ? `
+      <div class="suggest-chips">
+        ${(empty ? TUTOR_SUGGESTIONS : ['¿Qué hago ahora?', 'Organízame mañana', 'Explícame cómo aprobar ' + (S.activeSubjects()[0] ? S.shortName(S.activeSubjects()[0]) : 'una asignatura')])
+          .map((q) => `<button class="chip" data-action="ai-suggest" data-q="${esc(q)}">${esc(q)}</button>`).join('')}
+      </div>` : ''}
+    <p class="disclaimer">Respuestas generadas por IA: pueden equivocarse. Al preguntar se envía un resumen de tus datos de UniLog a tu servidor de Cloudflare.</p>
+    <form class="composer" data-save="ai-send">
+      <textarea id="ai-input" name="q" rows="1" maxlength="1500" placeholder="Escribe tu pregunta…" enterkeyhint="send"></textarea>
+      <button class="send" type="submit" aria-label="Enviar" ${aiBusy ? 'disabled' : ''}>${I.send}</button>
+    </form>`;
+}
+
+function scrollChatEnd() {
+  requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }));
+}
+
+async function sendTutor(text) {
+  text = (text || '').trim();
+  if (!text || aiBusy) return;
+  const chat = S.state.chat;
+  if (text !== '__retry__') chat.push({ role: 'user', content: text, t: Date.now() });
+  aiBusy = true;
+  aiError = null;
+  aiOutdated = false;
+  S.save();
+  if (route().name === 'tutor') { render(); scrollChatEnd(); }
+  try {
+    const reply = await askTutor(chat);
+    chat.push({ role: 'assistant', content: reply, t: Date.now() });
+    if (chat.length > 40) chat.splice(0, chat.length - 40);
+    S.save();
+    haptic();
+  } catch (e) {
+    aiError = e.message;
+    aiOutdated = !!e.outdated;
+  } finally {
+    aiBusy = false;
+  }
+  if (route().name === 'tutor') { render(); scrollChatEnd(); }
+}
+
+function openTutor(question) {
+  if (route().name !== 'tutor') tutorBack = location.hash || '#/inicio';
+  go('#/tutor');
+  if (question) setTimeout(() => sendTutor(question), 50);
+}
+
+// =============================================================
 //  AJUSTES
 // =============================================================
 
@@ -1733,6 +2091,31 @@ function viewSettings() {
         <label class="field"><span>Créditos de la carrera</span><input class="input" data-field="set" data-k="totalCredits" value="${esc(st.totalCredits)}" inputmode="numeric"></label>
         <label class="field"><span>Nota para aprobar</span><input class="input" data-field="set" data-k="passMark" value="${fmt(st.passMark)}" inputmode="decimal"></label>
       </div>
+    </div>
+
+    <h2 class="section-title">Planning diario</h2>
+    <div class="card form">
+      <div class="two">
+        <label class="field"><span>Empiezo el día a las</span><input class="input" type="time" data-field="plan-h" data-k="start" value="${esc(S.state.plan.start)}"></label>
+        <label class="field"><span>Termino a las</span><input class="input" type="time" data-field="plan-h" data-k="end" value="${esc(S.state.plan.end)}"></label>
+      </div>
+      <p class="hint">Organízame y la IA solo ponen cosas dentro de este horario.</p>
+    </div>
+
+    <h2 class="section-title">Tutor IA</h2>
+    <div class="card form">
+      <label class="field"><span>Dirección del servidor (Cloudflare Worker)</span>
+        <input class="input" data-field="set" data-k="aiUrl" value="${esc(st.aiUrl || '')}" placeholder="${esc(DEFAULT_AI_URL)}" inputmode="url" autocapitalize="off" spellcheck="false"></label>
+      <p class="hint">Usa el mismo servidor que GymLog. Si lo dejas vacío, se usa el de GymLog.</p>
+      <button class="btn block mt" data-action="ai-test">${I.sparkle} Probar el tutor</button>
+      <details class="steps">
+        <summary>Cómo actualizar el servidor para UniLog</summary>
+        <ol>
+          <li>Entra en el panel de Cloudflare → <b>Workers &amp; Pages</b> → <b>gymlog-ai</b>.</li>
+          <li><b>Edit code</b> → borra todo y pega el archivo <code>worker/worker.js</code> del repositorio <code>uni-app</code> → <b>Deploy</b>.</li>
+          <li>Listo: sirve a GymLog y a UniLog a la vez. El binding <b>AI</b> que ya tenías se queda igual.</li>
+        </ol>
+      </details>
     </div>
 
     <h2 class="section-title">Calendario</h2>
@@ -2430,12 +2813,19 @@ onGestures({
     else if (act === 'grade') openGradePad(id);
     else if (act === 'delete') removeItem(id);
     else if (act === 'del-session') removeSession(id);
+    else if (act === 'block-done') toggleBlock(id, row);
+    else if (act === 'del-block') removeBlockUndo(id);
   },
   long: (el) => {
     if (el.dataset.long === 'item') itemMenu(el.dataset.id);
     else if (el.dataset.long === 'subject') subjectMenu(el.dataset.id);
   },
   nav: (el, dir) => {
+    if (el.dataset.swipeNav === 'plan') {
+      planDate = S.ymd(new Date(S.toDate(planDate).getTime() + dir * 864e5));
+      renderTab();
+      return;
+    }
     if (el.dataset.swipeNav === 'week') {
       weekOffset += dir;
     } else {
@@ -2974,6 +3364,106 @@ const actions = {
     subjTab[el.dataset.id] = 'info';
     go(`#/asignatura/${el.dataset.id}`);
   },
+  // --- Planning ---
+  'plan-open': () => { planDate = S.ymd(); },
+  'plan-day': (el) => {
+    const v = +el.dataset.v;
+    planDate = v === 0 ? S.ymd() : S.ymd(new Date(S.toDate(planDate).getTime() + v * 864e5 + 3600e3));
+    haptic();
+    renderTab();
+  },
+  'plan-auto': (el) => runAutoPlan(el.dataset.today ? S.ymd() : planDate),
+  'plan-ai': (el) => {
+    const date = el.dataset.today ? S.ymd() : planDate;
+    const q = date === S.ymd() ? 'Organízame el día de hoy' : `Organízame el ${longDate(date).toLowerCase()} (${date})`;
+    openTutor(q);
+  },
+  'new-block': (el) => openBlockSheet(null, { start: el.dataset.start || '', end: el.dataset.end || '' }),
+  'edit-block': (el) => openBlockSheet(el.dataset.id),
+  'save-block': () => {
+    const d = formData();
+    const { id, date } = sheetCtx;
+    if ((d.start && !d.end) || (!d.start && d.end)) return toast('Pon las dos horas o ninguna');
+    if (d.start && M(d.end) <= M(d.start)) return toast('La hora de fin tiene que ser después');
+    const s = S.subject(d.subjectId);
+    const tp = St.topicOf(d.subjectId, d.topicId);
+    const title = d.title.trim() || (tp ? `${S.shortName(s)}: ${tp.name}` : s ? `${Pl.KINDS[d.kind].label} ${S.shortName(s)}` : Pl.KINDS[d.kind].label);
+    const data = { kind: d.kind, title, subjectId: d.subjectId, topicId: d.topicId, start: d.start, end: d.end, done: !!d.done };
+    if (id) Object.assign(Pl.block(date, id), data, { auto: false });
+    else Pl.addBlock(date, data);
+    S.save();
+    closeOverlay();
+    haptic('success');
+    render();
+  },
+  'del-block': (el) => { closeOverlay(); removeBlockUndo(el.dataset.id); },
+  'block-toggle': (el) => toggleBlock(el.dataset.id, el),
+  'block-study': (el) => {
+    const b = Pl.block(blockDate(el.dataset.id), el.dataset.id);
+    if (!b) return;
+    St.unlockAudio();
+    if (St.timer()) { toast('Ya tienes un bloque en marcha'); go('#/estudio'); return; }
+    studySubj = b.subjectId;
+    studyTopic = b.topicId || '';
+    S.state.study.next = 'focus';
+    St.start({ mode: 'focus', subjectId: studySubj, topicId: studyTopic });
+    haptic('heavy');
+    go('#/estudio');
+  },
+  'add-task': (form) => {
+    const title = form.elements.task.value.trim();
+    if (!title) return;
+    Pl.addBlock(planDate, { title, kind: 'task' });
+    haptic();
+    render();
+    app.querySelector('[data-save="add-task"] input')?.focus();
+  },
+
+  // --- Tutor IA ---
+  'go-tutor': () => openTutor(),
+  'ai-send': (form) => {
+    const q = form.elements.q.value;
+    form.elements.q.value = '';
+    sendTutor(q);
+  },
+  'ai-suggest': (el) => sendTutor(el.dataset.q),
+  'ai-retry': () => {
+    const last = S.state.chat[S.state.chat.length - 1];
+    if (last?.role === 'user') sendTutor('__retry__');
+  },
+  'ai-clear': async () => {
+    if (!(await ask('¿Borrar la conversación con el tutor?', { ok: 'Borrar', danger: true }))) return;
+    S.state.chat = [];
+    aiError = null;
+    S.save();
+    render();
+  },
+  'ai-apply': (el) => {
+    const m = S.state.chat[+el.dataset.i];
+    const { plan } = splitPlan(m?.content || '');
+    if (!plan) return;
+    const res = Pl.applyPlan(plan.date, plan.blocks);
+    m.applied = true;
+    S.save();
+    planDate = plan.date;
+    haptic('success');
+    go('#/plan');
+    undoable(`Plan añadido (${plan.blocks.length} bloques)`, () => { Pl.undoAuto(plan.date, res); m.applied = false; S.save(); });
+  },
+  'ai-test': async (el) => {
+    el.disabled = true;
+    el.textContent = 'Probando…';
+    try {
+      await askTutor([{ role: 'user', content: 'Responde solo: "Conectado".' }]);
+      toast('¡El tutor funciona!');
+      haptic('success');
+    } catch (e) {
+      toast(e.message, 5000);
+      haptic('heavy');
+    }
+    render();
+  },
+
   'study-settings': () => {
     const x = S.state.study;
     sheetCtx = {};
@@ -3272,6 +3762,16 @@ document.addEventListener('change', async (e) => {
   const f = t.dataset.field;
   const st = S.state.settings;
 
+  if (t.name === 'subjectId' && t.closest('form[data-save="save-block"]')) {
+    document.getElementById('topic-sel').innerHTML = select('topicId', topicOptions(t.value), '');
+    return;
+  }
+  if (t.dataset.field === 'plan-h' && t.value) {
+    S.state.plan[t.dataset.k] = t.value;
+    S.save();
+    toast('Guardado', 1400);
+    return;
+  }
   if (t.name === 'optional' && t.closest('#overlay form')) {
     t.closest('form').querySelector('.only-opt').hidden = !t.checked;
     return;
@@ -3319,6 +3819,20 @@ document.addEventListener('change', async (e) => {
       t.value = '';
     }
   }
+});
+
+// Intro en el chat del tutor envía (Mayús+Intro, nueva línea)
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'ai-input') {
+    e.preventDefault();
+    e.target.form.requestSubmit();
+  }
+});
+// El cuadro de texto del chat crece con lo que escribes
+document.addEventListener('input', (e) => {
+  if (e.target.id !== 'ai-input') return;
+  e.target.style.height = 'auto';
+  e.target.style.height = `${Math.min(140, e.target.scrollHeight)}px`;
 });
 
 // Intro en el asistente pasa al siguiente paso
