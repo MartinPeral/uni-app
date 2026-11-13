@@ -111,8 +111,8 @@ export function generate() {
 
   // Quita lo generado antes (pendiente) desde hoy
   const removed = [];
+  // (también lo atrasado de días pasados: se vuelve a repartir desde hoy)
   for (const [date, day] of Object.entries(S.state.plan.days)) {
-    if (date < today) continue;
     const keep = [];
     for (const b of day.blocks || []) {
       if (b.auto === 'long' && !b.done) removed.push({ date, b });
@@ -228,6 +228,69 @@ export function generate() {
   cfg.summary = { at: Date.now(), to, days, summary, blocks: added.length };
   S.save();
   return { added, removed, summary, to };
+}
+
+// ---------- Lo que no hiciste pasa al día siguiente ----------
+
+const DAY_MAX = 8 * 60; // como mucho 8 h de estudio planificado en un día
+
+/** Minutos de estudio con hora que hay ya en un día */
+const studyOn = (date) => Pl.dayBlocks(date)
+  .filter((b) => b.kind === 'study' && b.start && b.end)
+  .reduce((a, b) => a + M(b.end) - M(b.start), 0);
+
+/**
+ * Los bloques del plan de días pasados que no marcaste como hechos se
+ * mueven a hoy (o a los siguientes días si hoy no caben), siempre antes
+ * de su examen. Se descartan si el examen ya ha pasado o si ese tema ya
+ * lo llevas bien. Devuelve { moved, dropped }.
+ */
+export function carryOver() {
+  const today = S.ymd();
+  const pending = [];
+  for (const [date, day] of Object.entries(S.state.plan.days)) {
+    if (date >= today) continue;
+    const keep = [];
+    for (const b of day.blocks || []) {
+      if (b.auto === 'long' && !b.done && b.kind === 'study') pending.push({ date, b });
+      else keep.push(b);
+    }
+    if (keep.length !== (day.blocks || []).length) day.blocks = keep;
+  }
+  if (!pending.length) return { moved: [], dropped: [] };
+
+  pending.sort((a, b) => a.date.localeCompare(b.date) || (a.b.start || '').localeCompare(b.b.start || ''));
+  const moved = [];
+  const dropped = [];
+  const used = {}; // por día: hasta qué minuto ya hemos colocado
+  for (const { date, b } of pending) {
+    const ex = b.examId ? S.item(b.examId) : null;
+    const tp = b.topicId ? St.topicOf(b.subjectId, b.topicId) : null;
+    const len = M(b.end) - M(b.start);
+    const stale = !ex && S.daysUntil(date) < -7;
+    if ((ex && (!ex.date || ex.date <= today)) || (tp && St.confOf(tp) >= 2) || stale || !(len > 0)) {
+      dropped.push(b);
+      continue;
+    }
+    const last = ex ? addDays(ex.date, -1) : addDays(today, 7);
+    let placed = false;
+    for (let d = today; d <= last && !placed; d = addDays(d, 1)) {
+      if (studyOn(d) + len > DAY_MAX) continue;
+      for (const [a, z] of slotsFor(d)) {
+        const from = Math.max(a, used[d] || 0);
+        if (from + len > z) continue;
+        Object.assign(b, { start: Pl.hhmm(from), end: Pl.hhmm(from + len), carried: b.carried || date });
+        Pl.dayBlocks(d, true).push(b);
+        used[d] = from + len + 10;
+        moved.push({ date: d, b });
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) dropped.push(b);
+  }
+  S.save();
+  return { moved, dropped };
 }
 
 /** Deshace la última generación */

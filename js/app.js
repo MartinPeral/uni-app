@@ -9,7 +9,7 @@ import * as Pl from './plan.js';
 import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.3';
+const APP_VERSION = '3.4';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -1793,7 +1793,7 @@ function blockRow(b, date, nowM) {
   }
   const dur = b.start && b.end ? M(b.end) - M(b.start) : null;
   const tp = St.topicOf(b.subjectId, b.topicId);
-  const meta = [Pl.KINDS[b.kind]?.label, s && !b.title.includes(S.shortName(s)) ? S.shortName(s) : '', tp && !b.title.includes(tp.name) ? tp.name : '', dur ? mins(dur) : '']
+  const meta = [b.carried && !b.done ? `Atrasado del ${dayMonth(b.carried)}` : '', Pl.KINDS[b.kind]?.label, s && !b.title.includes(S.shortName(s)) ? S.shortName(s) : '', tp && !b.title.includes(tp.name) ? tp.name : '', dur ? mins(dur) : '']
     .filter(Boolean).map(esc).join(' · ');
   return `
     <div class="row-item swipe pb-swipe" data-id="${b.id}" data-right="block-done" data-left="del-block" data-left-out="1" style="--c:${blockColor(b)}">
@@ -4144,6 +4144,28 @@ setInterval(() => {
 // ---------- Arranque ----------
 
 applyTheme();
+/** Lo que no hiciste otro día del plan pasa a hoy (o a los siguientes) */
+function runCarryOver() {
+  const { moved, dropped } = SP.carryOver();
+  if (!moved.length && !dropped.length) return false;
+  const today = moved.filter((x) => x.date === S.ymd()).length;
+  const later = moved.length - today;
+  const parts = [];
+  if (today) parts.push(`${today} a hoy`);
+  if (later) parts.push(`${later} a los próximos días`);
+  setTimeout(() => toast(moved.length
+    ? `Lo que no hiciste se ha pasado: ${parts.join(' y ')}${dropped.length ? ` (${dropped.length} ya no ${dropped.length === 1 ? 'hacía' : 'hacían'} falta)` : ''}`
+    : `${dropped.length} ${dropped.length === 1 ? 'bloque atrasado ya no hacía' : 'bloques atrasados ya no hacían'} falta`, 4200), 1700);
+  return true;
+}
+runCarryOver();
+let carryDay = S.ymd();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || carryDay === S.ymd()) return;
+  carryDay = S.ymd();
+  if (runCarryOver()) render();
+});
+
 render();
 
 // ---------- Animación de apertura ----------
