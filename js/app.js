@@ -9,7 +9,7 @@ import * as Pl from './plan.js';
 import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');

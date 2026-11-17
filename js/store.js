@@ -894,7 +894,7 @@ export const PRESETS = [
   },
   {
     name: 'Suma de apartados con mínimos (en puntos)',
-    desc: 'Como TG: trabajo 30 % (mín. 1 sobre 3), examen 30 % (mín. 1 sobre 3) y participación en problemas y laboratorio 40 % (mín. 1,5 sobre 4)',
+    desc: 'Como TG: trabajo 30 % (mín. 1 sobre 3), examen 30 % (mín. 1 sobre 3) y participación en problemas y laboratorio 40 % (mín. 1,5 sobre 4), con retos sobre 0,6',
     comps: [
       { key: 'tr', name: 'Trabajo de investigación', kind: 'entrega', area: 'otro', weight: 30, min: 1, points: true },
       { key: 'ex', name: 'Examen', kind: 'examen', area: 'teoria', weight: 30, min: 1, points: true },
@@ -903,6 +903,8 @@ export const PRESETS = [
     items: [
       ['tr', 'entrega', 'Trabajo de investigación (en grupo)'],
       ['ex', 'examen', 'Examen de contenidos'],
+      ['pa', 'practica', 'Reto 1', { max: 0.6 }],
+      ['pa', 'practica', 'Reto 2', { max: 0.6 }],
     ],
     notes: 'Primera convocatoria por evaluación continua: la nota final es la suma de los tres apartados, siempre que se llegue al mínimo en cada uno. No hay examen final en primera convocatoria. En el resto de convocatorias: examen teórico-práctico de todo lo del cuatrimestre (teoría y prácticas).',
   },
@@ -956,8 +958,8 @@ export function applyPreset(s, preset) {
   if (preset.items && !isSplit(s)) {
     const ids = {};
     s.comps = preset.comps.map(({ key, ...c }) => (ids[key] = { id: uid(), ...c }));
-    for (const [key, kind, title] of preset.items) {
-      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title }));
+    for (const [key, kind, title, extra] of preset.items) {
+      state.items.push(newItem({ subjectId: s.id, compId: ids[key].id, kind, title, ...(extra || {}) }));
     }
     return;
   }
