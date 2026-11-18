@@ -2,6 +2,10 @@
 
 App web instalable (PWA) para organizar la universidad: asignaturas, horario, exámenes, prácticas, entregas, métodos de evaluación y notas. Funciona sin conexión y los datos se guardan en el propio móvil.
 
+## Novedades de la versión 3.6
+
+- **Las horas bajan solas:** al marcar un tema como flojo, bien o dominado, las horas que te quedan bajan al 60 %, 30 % o 10 % ("quedan 54 min de 3 h"), y el plan de estudio se reajusta al momento.
+
 ## Novedades de la versión 3.4
 
 - **Lo que no haces se acumula:** los bloques del plan de estudio que un día no marcas como hechos pasan solos a hoy (o a los días siguientes si hoy no caben), siempre antes de su examen y con la etiqueta *Atrasado del…*. Si ese tema ya lo llevas bien o el examen ya pasó, se descartan.
@@ -89,7 +93,7 @@ Abre la carpeta en VS Code, clic derecho en `index.html` → **Open with Live Se
 
 ## Actualizarla
 
-Sube los cambios y cambia `CACHE = 'unilog-v17'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
+Sube los cambios y cambia `CACHE = 'unilog-v18'` en `sw.js` a `v2`, `v3`… para que el móvil coja la versión nueva.
 
 ## Copias de seguridad
 

@@ -22,6 +22,12 @@ export const settings = L;
 
 export const topicHours = (t) => (Number(t.hours) > 0 ? Number(t.hours) : DEFAULT_HOURS);
 
+/** Minutos que te quedan de un tema según cómo lo llevas (baja al subir el dominio) */
+export const topicLeft = (t) => Math.round(topicHours(t) * 60 * FACTOR[St.confOf(t)]);
+
+/** ¿Hay un plan de estudio generado que convenga reajustar? */
+export const hasPlan = () => !!L().summary;
+
 // ---------- Temarios ----------
 
 /** Convierte un temario pegado (una línea por tema) en nombres de temas */

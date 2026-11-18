@@ -9,7 +9,7 @@ import * as Pl from './plan.js';
 import * as SP from './studyplan.js';
 import { askTutor, aiUrl, DEFAULT_AI_URL, splitPlan, renderMarkdown } from './ai.js';
 
-const APP_VERSION = '3.5';
+const APP_VERSION = '3.6';
 
 const app = document.getElementById('app');
 const overlay = document.getElementById('overlay');
@@ -1029,13 +1029,13 @@ function infoTab(s) {
       const list = area === 'todo' ? topics : topics.filter((t) => S.topicArea(t) === area);
       return `
       <div class="topic-group ${area}">
-        <div class="tg-head"><b>${area === 'todo' ? 'Teoría y prácticas' : area === 'teoria' ? 'Teoría' : 'Prácticas'}</b><span>${list.length ? `${list.length} temas · ${fmt(list.reduce((x, t) => x + SP.topicHours(t), 0), 1)} h` : 'Sin temas'}</span>
+        <div class="tg-head"><b>${area === 'todo' ? 'Teoría y prácticas' : area === 'teoria' ? 'Teoría' : 'Prácticas'}</b><span>${list.length ? `${list.length} temas · ${topicsLeftLabel(list)}` : 'Sin temas'}</span>
           <button class="link" data-action="paste-topics" data-id="${s.id}" data-area="${area === 'todo' ? 'teoria' : area}">${I.list} Pegar lista</button></div>
         <div class="card flush topics">
           ${list.map((t) => `
             <div class="topic ${St.confOf(t) === 3 ? 'done' : ''}">
               ${confMeter(t, s)}
-              <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${fmt(SP.topicHours(t), 1)} h</small></button>
+              <button class="topic-name" data-action="edit-topic" data-id="${s.id}" data-t="${t.id}">${esc(t.name)}<small>${St.CONF[St.confOf(t)].label} · ${topicLeftLabel(t)}</small></button>
               <button class="icon-btn ghost sm" data-action="del-topic" data-id="${s.id}" data-t="${t.id}" aria-label="Quitar tema">${I.xs}</button>
             </div>`).join('')}
           <form class="topic-new" data-save="add-topic" data-id="${s.id}" data-area="${area === 'todo' ? 'teoria' : area}">
@@ -1439,6 +1439,39 @@ const clock = (sec) => {
 const mins = (m) => (m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`);
 
 const studySubjects = () => S.activeSubjects().filter((s) => S.isThisYear(s) || !s.academicYear);
+
+/** "quedan 1 h 48 min de 3 h", o solo "3 h" si no has empezado */
+function topicLeftLabel(t) {
+  const total = Math.round(SP.topicHours(t) * 60);
+  const left = SP.topicLeft(t);
+  return left >= total ? mins(total) : `quedan ${mins(left)} de ${mins(total)}`;
+}
+function topicsLeftLabel(list) {
+  const total = list.reduce((a, t) => a + Math.round(SP.topicHours(t) * 60), 0);
+  const left = list.reduce((a, t) => a + SP.topicLeft(t), 0);
+  return left >= total ? mins(total) : `quedan ${mins(left)} de ${mins(total)}`;
+}
+
+/** Al cambiar cómo llevas un tema, el plan de estudio se reajusta solo */
+let replanTimer = null;
+let replanFrom = null;
+function replanAfterConf(t, before) {
+  if (replanFrom == null || replanFrom.t !== t) replanFrom = { t, before };
+  clearTimeout(replanTimer);
+  replanTimer = setTimeout(() => {
+    const { t: tp, before: b } = replanFrom;
+    replanFrom = null;
+    const now = SP.topicLeft(tp);
+    if (now === b) return;
+    let msg = `${tp.name}: ${now ? `quedan ${mins(now)}` : 'ya no hace falta estudiarlo'} (antes ${mins(b)})`;
+    if (SP.hasPlan()) {
+      SP.generate();
+      msg += '. Plan reajustado';
+      if (route().name === 'plan-estudio' || route().name === 'plan') render();
+    }
+    toast(msg, 3200);
+  }, 900);
+}
 
 function confMeter(t, s) {
   const c = St.confOf(t);
@@ -2012,12 +2045,11 @@ function viewStudyPlan() {
 
   const syllabus = subs.map((s) => {
     const n = (s.topics || []).length;
-    const h = (s.topics || []).reduce((a, t) => a + SP.topicHours(t), 0);
     const np = s.sharedTopics ? 0 : (s.topics || []).filter((t) => S.topicArea(t) === 'practicas').length;
     return `
       <div class="sp-sub" style="--c:${subjColor(s)}">
         <span class="row-text"><strong><b class="sdot"></b>${esc(s.name)}</strong>
-          <small class="${n ? '' : 'text-bad'}">${n ? `${s.sharedTopics ? `${n} temas (teoría y prácticas)` : `${n - np} de teoría${np ? ` · ${np} de prácticas` : ''}`} · ~${fmt(h, 1)} h` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
+          <small class="${n ? '' : 'text-bad'}">${n ? `${s.sharedTopics ? `${n} temas (teoría y prácticas)` : `${n - np} de teoría${np ? ` · ${np} de prácticas` : ''}`} · ${topicsLeftLabel(s.topics)}` : 'Sin temario: el plan no sabe qué estudiar'}</small></span>
         <button class="btn sm ${n ? 'ghost' : 'primary'}" data-action="paste-topics" data-id="${s.id}" data-area="${n && !np ? 'practicas' : 'teoria'}">${n ? 'Añadir' : 'Pegar temario'}</button>
       </div>`;
   }).join('');
@@ -2122,7 +2154,7 @@ function openTopicSheet(subjectId, topicId) {
     ${S.subject(subjectId)?.sharedTopics ? `<input type="hidden" name="area" value="${S.topicArea(t)}">` : `<div class="field"><span>Es de</span>${segPick('area', [['teoria', 'Teoría'], ['practicas', 'Prácticas']], S.topicArea(t))}</div>`}
     ${field('Horas que le calculas', text('hours', fmt(SP.topicHours(t), 1), 'inputmode="decimal"'))}
     <div class="field"><span>Cómo lo llevas</span>${segPick('conf', St.CONF.map((c, i) => [i, c.short]), St.confOf(t))}</div>
-    <p class="hint">El plan reparte las horas según lo que lo domines: un tema «bien» necesita menos de la mitad que uno sin empezar.</p>`, 'save-topic');
+    <p class="hint">Las horas que te quedan bajan solas según cómo lo lleves: flojo 60 %, bien 30 %, dominado 10 %. Si tienes un plan de estudio, se reajusta al momento.</p>`, 'save-topic');
 }
 
 // =============================================================
@@ -3555,8 +3587,10 @@ const actions = {
   'topic-conf': (el) => {
     const t = St.topicOf(el.dataset.id, el.dataset.t);
     if (!t) return;
+    const before = SP.topicLeft(t);
     St.setConf(t, (St.confOf(t) + 1) % 4);
     S.save();
+    replanAfterConf(t, before);
     haptic(St.confOf(t) === 3 ? 'success' : 'light');
     if (St.confOf(t) === 3) burstFrom(el, 0.3);
     render();
@@ -3564,8 +3598,10 @@ const actions = {
   'set-conf': (el) => {
     const t = St.topicOf(el.dataset.id, el.dataset.t);
     if (!t) return;
+    const before = SP.topicLeft(t);
     St.setConf(t, +el.dataset.c);
     S.save();
+    replanAfterConf(t, before);
     haptic();
     el.parentElement.querySelectorAll('.conf-opt').forEach((b) => b.classList.toggle('on', b === el));
   },
@@ -3649,7 +3685,9 @@ const actions = {
     t.name = d.name.trim();
     t.hours = Math.min(100, Math.max(0.25, parseNum(d.hours) || 3));
     t.area = d.area === 'practicas' ? 'practicas' : 'teoria';
+    const before = SP.topicLeft(t);
     St.setConf(t, +d.conf);
+    replanAfterConf(t, before);
     S.save();
     closeOverlay();
     render();
